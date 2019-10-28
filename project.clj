@@ -1,0 +1,24 @@
+(defproject jepsen.etcd "0.1.0-SNAPSHOT"
+  :description "etcd Jepsen test"
+  :url "https://github.io/jepsen/etcd"
+  :license {:name "EPL-2.0 OR GPL-2.0-or-later WITH Classpath-exception-2.0"
+            :url "https://www.eclipse.org/legal/epl-2.0/"}
+  :dependencies [[org.clojure/clojure "1.10.0"]
+                 [jepsen "0.1.16-SNAPSHOT"]
+
+                 ; jetcd has a bunch of dep ranges we have to pin
+                 [io.etcd/jetcd-core "0.4.1"
+                  :exclusions [io.grpc/grpc-api
+                               com.google.errorprone/error_prone_annotations
+                               io.grpc/grpc-netty
+                               io.grpc/grpc-core]]
+                 [io.grpc/grpc-core "1.24.0"
+                  :exclusions [io.grpc/grpc-api
+                               com.google.errorprone/error_prone_annotations]]
+                 [io.grpc/grpc-api "1.24.0"]
+                 [io.netty/netty-codec-http2 "4.1.38.Final"]
+                 [com.google.errorprone/error_prone_annotations "2.3.3"]
+
+                 [verschlimmbesserung "0.1.3"]]
+  :repl-options {:init-ns jepsen.etcd}
+  :main jepsen.etcd)

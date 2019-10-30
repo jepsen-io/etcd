@@ -47,8 +47,7 @@
 (defn ^Op$PutOp put
   "Constructs a put operation."
   [k v]
-  (Op/put (->bytes k) (->bytes v) put-option-with-prev-kv))
-          ;PutOption/DEFAULT))
+  (Op/put (->bytes k) (->bytes v) PutOption/DEFAULT))
 
 (defn version
   "A comparison target by version."

@@ -20,8 +20,6 @@
                   :exclusions [io.grpc/grpc-core
                                io.netty/netty-codec-http2]]
                  [io.netty/netty-codec-http2 "4.1.38.Final"]
-                 [com.google.errorprone/error_prone_annotations "2.3.3"]
-
-                 [verschlimmbesserung "0.1.3"]]
+                 [com.google.errorprone/error_prone_annotations "2.3.3"]]
   :repl-options {:init-ns jepsen.etcd}
   :main jepsen.etcd)

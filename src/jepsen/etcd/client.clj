@@ -1,6 +1,6 @@
 (ns jepsen.etcd.client
   "Client library wrapper for jetcd"
-  (:refer-clojure :exclude [get])
+  (:refer-clojure :exclude [get swap!])
   (:require [clojure.tools.logging :refer [info warn]]
             [jepsen.etcd [support :as support]]
             [jepsen.etcd.client.txn :as t]
@@ -157,7 +157,6 @@
   ([c test t-branch]
    (txn! c test t-branch nil))
   ([c test t f]
-   (info :txn :test test :true-branch t)
    (->clj
      (.. (kv-client c)
          (txn)
@@ -171,8 +170,34 @@
   "A compare-and-set transaction on key k from value v to v'. Returns false if
   failed, true otherwise."
   [c k v v']
-  (let [r (-> c
-              (txn! (t/= k (t/value v))
-                    (t/put k v')))]
-    (info :cas! k :from v :to v' :res r)
-    (:succeeded? r)))
+  (-> c
+      (txn! (t/= k (t/value v))
+            (t/put k v'))
+      :succeeded?))
+
+(defn cas-revision!
+  "Like cas!, but takes a current modification revision for the key, and
+  updates it to v' only if the revision matches."
+  [c k rev v']
+  (-> c
+      (txn! (t/= k (t/mod-revision rev))
+            (t/put k v'))
+      :succeeded?))
+
+(defn swap-retry-delay
+  "A delay time for swap! retries, in milliseconds"
+  []
+  (rand 50))
+
+(defn swap!
+  "Like clojure.core's swap!; takes a key and a function taking a value of that
+  key to a new value. Calls cas! to update the value of that key to (f
+  current-val & args). Includes a retry loop."
+  [c k f & args]
+  (loop []
+    (let [{:keys [value mod-revision]} (get c k)
+          value' (apply f value args)]
+      (if (cas-revision! c k mod-revision value')
+        value'
+        (do (Thread/sleep (swap-retry-delay))
+            (recur))))))

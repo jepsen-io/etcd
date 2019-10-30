@@ -17,8 +17,7 @@
                          [set :as set]
                          [support :as s]]
             [knossos.model :as model]
-            [slingshot.slingshot :refer [try+]]
-            [verschlimmbesserung.core :as v]))
+            [slingshot.slingshot :refer [try+]]))
 
 (def dir "/opt/etcd")
 (def binary "etcd")

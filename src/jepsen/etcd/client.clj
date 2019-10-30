@@ -14,7 +14,8 @@
                           CloseableClient
                           KeyValue
                           KV
-                          Response)
+                          Response
+                          Response$Header)
            (io.etcd.jetcd.kv GetResponse
                              PutResponse
                              TxnResponse)
@@ -46,20 +47,28 @@
                                       :create-revision  (.getCreateRevision kv)
                                       :mod-revision     (.getModRevision kv)}))
 
+  Response$Header (->clj [h]
+                    {:member-id (.getMemberId h)
+                     :revision  (.getRevision h)
+                     :raft-term (.getRaftTerm h)})
+
   GetResponse (->clj [r]
                 {:count  (.getCount r)
                  :kvs    (into {} (map ->clj (.getKvs r)))
-                 :more?  (.isMore r)})
+                 :more?  (.isMore r)
+                 :header (->clj (.getHeader r))})
 
   PutResponse (->clj [r]
-                {:prev-kv (->clj (.getPrevKv r))
-                 :prev-kv? (.hasPrevKv r)})
+                {:prev-kv   (->clj (.getPrevKv r))
+                 :prev-kv?  (.hasPrevKv r)
+                 :header    (->clj (.getHeader r))})
 
   TxnResponse (->clj [r]
                 {:succeeded? (.isSucceeded r)
                  :gets       (map ->clj (.getGetResponses r))
                  :puts       (map ->clj (.getPutResponses r))
-                 :txns       (map ->clj (.getTxnResponses r))})
+                 :txns       (map ->clj (.getTxnResponses r))
+                 :header     (->clj (.getHeader r))})
   )
 
 ; Opening and closing clients
@@ -69,6 +78,7 @@
   [node]
   (.. (Client/builder)
       (endpoints (into-array String [(support/client-url node)]))
+      ;(endpoints (into-array String (map support/client-url ["n1" "n2" "n3" "n4" "n5"])))
       (lazyInitialization false)
       ; (loadBalancerPolicy "some string???")
       (build)))
@@ -136,13 +146,20 @@
       .get
       ->clj))
 
-(defn get
-  "Gets the value for a key, synchronously."
+(defn get*
+  "Gets the value for a key, synchronously. Raw version; includes headers and
+  full response."
   [c k]
   (-> c kv-client
       (.get (->bytes k))
       .get
-      ->clj
+      ->clj))
+
+(defn get
+  "Gets the value for a key, synchronously. Friendly version: returns just the
+  key's value."
+  [c k]
+  (-> (get* c k)
       :kvs
       vals
       first))

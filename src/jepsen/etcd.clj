@@ -1,5 +1,5 @@
 (ns jepsen.etcd
-  (:require [clojure.tools.logging :refer :all]
+  (:require [clojure.tools.logging :refer [info warn]]
             [clojure.string :as str]
             [jepsen [checker :as checker]
                     [cli :as cli]
@@ -13,7 +13,8 @@
             [jepsen.checker.timeline :as timeline]
             [jepsen.control.util :as cu]
             [jepsen.os.debian :as debian]
-            [jepsen.etcd [set :as set]
+            [jepsen.etcd [client :as ec]
+                         [set :as set]
                          [support :as s]]
             [knossos.model :as model]
             [slingshot.slingshot :refer [try+]]
@@ -71,42 +72,31 @@
 (defrecord Client [conn]
   client/Client
   (open! [this test node]
-    (assoc this :conn (v/connect (s/client-url node)
-                                 {:timeout 5000})))
+    (assoc this :conn (ec/client node)))
 
   (setup! [this test])
 
   (invoke! [_ test op]
     (let [[k v] (:value op)]
-      (try+
+      (ec/with-errors op #{:read}
         (case (:f op)
           :read (let [value (-> conn
-                                (v/get k {:quorum? (:quorum test)})
-                                parse-long)]
+                                (ec/get k) ; {:quorum? (:quorum test)})
+                                :value)]
                   (assoc op :type :ok, :value (independent/tuple k value)))
 
-          :write (do (v/reset! conn k v)
+          :write (do (ec/put! conn k v)
                      (assoc op :type :ok))
 
           :cas (let [[old new] v]
-                 (assoc op :type (if (v/cas! conn k old new)
+                 (assoc op :type (if (ec/cas! conn k old new)
                                    :ok
-                                   :fail))))
-
-        (catch java.net.SocketTimeoutException e
-          (assoc op
-                 :type  (if (= :read (:f op)) :fail :info)
-                 :error :timeout))
-
-        (catch [:errorCode 100] e
-          (assoc op :type :fail, :error :not-found)))))
+                                   :fail)))))))
 
   (teardown! [this test])
 
   (close! [_ test]
-    ; If our connection were stateful, we'd close it here. Verschlimmmbesserung
-    ; doesn't actually hold connections, so there's nothing to close.
-    ))
+    (ec/close! conn)))
 
 (defn r   [_ _] {:type :invoke, :f :read, :value nil})
 (defn w   [_ _] {:type :invoke, :f :write, :value (rand-int 5)})
@@ -154,8 +144,10 @@
             :db         (db)
             :nemesis    (nemesis/partition-random-halves)
             :checker    (checker/compose
-                          {:perf     (checker/perf)
-                           :workload (:checker workload)})
+                          {:perf        (checker/perf)
+                           :stats       (checker/stats)
+                           :exceptions  (checker/unhandled-exceptions)
+                           :workload    (:checker workload)})
             :client    (:client workload)
             :generator (gen/phases
                          (->> (:generator workload)

@@ -16,6 +16,9 @@
                   :exclusions [io.grpc/grpc-api
                                com.google.errorprone/error_prone_annotations]]
                  [io.grpc/grpc-api "1.24.0"]
+                 [io.grpc/grpc-netty "1.24.0"
+                  :exclusions [io.grpc/grpc-core
+                               io.netty/netty-codec-http2]]
                  [io.netty/netty-codec-http2 "4.1.38.Final"]
                  [com.google.errorprone/error_prone_annotations "2.3.3"]
 

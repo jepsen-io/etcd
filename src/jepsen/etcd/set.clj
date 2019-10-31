@@ -19,7 +19,8 @@
       (case (:f op)
         :read (assoc op
                      :type :ok,
-                     :value (:value (c/get conn k)))
+                     :value (:value (c/get conn k {:serializable?
+                                                   (:serializable test)})))
 
         :add (do (c/swap! conn k conj (:value op))
                  (assoc op :type :ok)))))
@@ -29,12 +30,19 @@
   (close! [_ test]
     (c/close! conn)))
 
+(defn w
+  []
+  (->> (range)
+       (map (fn [x] {:type :invoke, :f :add, :value x}))
+       gen/seq))
+
+(defn r
+  []
+  {:type :invoke, :f :read, :value nil})
+
 (defn workload
   "A generator, client, and checker for a set test."
   [opts]
   {:client    (SetClient. "a-set" nil)
-   :checker   (checker/set)
-   :generator (->> (range)
-                   (map (fn [x] {:type :invoke, :f :add, :value x}))
-                   gen/seq)
-   :final-generator (gen/once {:type :invoke, :f :read, :value nil})})
+   :checker   (checker/set-full {:linearizable? true})
+   :generator (gen/reserve 5 (r) (w))})

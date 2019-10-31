@@ -83,16 +83,16 @@
       :ops-per-key  Maximum number of operations allowed on any given key.
       :workload     Name of the workload to run."
   [opts]
-  (let [quorum        (boolean (:quorum opts))
+  (let [serializable  (boolean (:serializable opts))
         workload-name (:workload opts)
         workload      ((workloads workload-name) opts)]
     (merge tests/noop-test
            opts
-           {:name       (str "etcd " workload-name " q=" quorum)
-            :quorum     quorum
+           {:name       (str "etcd " workload-name " s=" serializable)
+            :serializable serializable
             :os         debian/os
             :db         (db)
-            :nemesis    (nemesis/partition-random-halves)
+            :nemesis    nemesis/noop ;(nemesis/partition-random-halves)
             :checker    (checker/compose
                           {:perf        (checker/perf)
                            :stats       (checker/stats)

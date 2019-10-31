@@ -24,6 +24,8 @@
                              Op
                              Op$PutOp
                              Op$GetOp)
+           (io.etcd.jetcd.options GetOption
+                                  PutOption)
            (io.grpc Status$Code
                     StatusRuntimeException)))
 ; Serialization
@@ -142,27 +144,41 @@
   "Sets key to value, synchronously."
   [c k v]
   (-> c kv-client
-      (.put (->bytes k) (->bytes v))
+      (.put (->bytes k) (->bytes v) t/put-option-with-prev-kv)
       .get
       ->clj))
+
+(defn get-options
+  "Takes an option map for a get request, and constructs a GetOption. Options
+  are:
+
+      :serializable?      true/false"
+  [opts]
+  (.. (GetOption/newBuilder)
+      (withSerializable (boolean (:serializable? opts)))
+      (build)))
 
 (defn get*
   "Gets the value for a key, synchronously. Raw version; includes headers and
   full response."
-  [c k]
-  (-> c kv-client
-      (.get (->bytes k))
-      .get
-      ->clj))
+  ([c k]
+   (get* c k {}))
+  ([c k opts]
+   (-> c kv-client
+       (.get (->bytes k) (get-options opts))
+       .get
+       ->clj)))
 
 (defn get
   "Gets the value for a key, synchronously. Friendly version: returns just the
   key's value."
-  [c k]
-  (-> (get* c k)
-      :kvs
-      vals
-      first))
+  ([c k]
+   (get c k {}))
+  ([c k opts]
+   (-> (get* c k opts)
+       :kvs
+       vals
+       first)))
 
 (defn txn!
   "Right now, transactions are all if statements, so this takes 2 or three
@@ -183,13 +199,19 @@
          (commit)
          (get)))))
 
+(defn cas*!
+  "Like cas!, but raw; returns full txn response map."
+  [c k v v']
+  (txn! c
+        (t/= k (t/value v))
+        (t/put k v')))
+
 (defn cas!
   "A compare-and-set transaction on key k from value v to v'. Returns false if
   failed, true otherwise."
   [c k v v']
   (-> c
-      (txn! (t/= k (t/value v))
-            (t/put k v'))
+      (cas*! k v v')
       :succeeded?))
 
 (defn cas-revision!

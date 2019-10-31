@@ -3,51 +3,101 @@
   (:require [clojure.tools.logging :refer [info warn]]
             [clojure.string :as str]
             [jepsen [checker :as checker]
-                    [cli :as cli]
                     [client :as client]
-                    [control :as c]
-                    [db :as db]
                     [generator :as gen]
-                    [independent :as independent]
-                    [nemesis :as nemesis]
-                    [tests :as tests]]
+                    [independent :as independent]]
             [jepsen.checker.timeline :as timeline]
-            [jepsen.control.util :as cu]
-            [jepsen.os.debian :as debian]
-            [jepsen.etcd [client :as ec]]
+            [jepsen.etcd [client :as c]]
             [knossos.model :as model]
-            [slingshot.slingshot :refer [try+]]))
+            [slingshot.slingshot :refer [try+]])
+  (:import (knossos.model Model)))
 
 (defrecord Client [conn]
   client/Client
   (open! [this test node]
-    (assoc this :conn (ec/client node)))
+    (assoc this :conn (c/client node)))
 
   (setup! [this test])
 
   (invoke! [_ test op]
-    (let [[k v] (:value op)]
-      (ec/with-errors op #{:read}
+    (let [[k [version value]] (:value op)]
+      (c/with-errors op #{:read}
         (case (:f op)
-          :read (let [value (-> conn (ec/get k) :value)]
-                  (assoc op :type :ok, :value (independent/tuple k value)))
+          :read (let [r (c/get conn k {:serializable? (:serializable test)})
+                      v [(:version r) (:value r)]]
+                  (assoc op :type :ok, :value (independent/tuple k v)))
 
-          :write (do (ec/put! conn k v)
-                     (assoc op :type :ok))
+          :write (let [r        (c/put! conn k value)
+                       version  (-> r :prev-kv val :version inc)]
+                   (assoc op
+                          :type :ok
+                          :value (independent/tuple k [version value])))
 
-          :cas (let [[old new] v]
-                 (assoc op :type (if (ec/cas! conn k old new)
-                                   :ok
-                                   :fail)))))))
+          :cas (let [[old new]  value
+                     r          (c/cas*! conn k old new)
+                     version    (some-> r :puts first :prev-kv val :version
+                                        inc)]
+                 (if (:succeeded? r)
+                   (assoc op
+                          :type  :ok
+                          :value (independent/tuple k [version value]))
+                   (assoc op :type :fail)))))))
 
   (teardown! [this test])
 
   (close! [_ test]
-    (ec/close! conn)))
+    (c/close! conn)))
 
-(defn r   [_ _] {:type :invoke, :f :read, :value nil})
-(defn w   [_ _] {:type :invoke, :f :write, :value (rand-int 5)})
-(defn cas [_ _] {:type :invoke, :f :cas, :value [(rand-int 5) (rand-int 5)]})
+; A versioned register takes operation :values which are [version value] pairs,
+; where version is a monotonically advancing value which increments with every
+; update. Version reflects the version *resulting* from an update, or, for
+; reads, the version read.
+(defrecord VersionedRegister [version value]
+  Object
+  (toString [this] (str "v" version ": " value))
+
+  Model
+  (step [model op]
+    (let [[op-version op-value] (:value op)
+          version' (inc version)]
+      (condp = (:f op)
+        :write (if (and (not (nil? op-version))
+                        (not= version' op-version))
+                 (model/inconsistent
+                   (str "can't go from version " version " to " op-version))
+                 (VersionedRegister. version' op-value))
+
+        :cas   (let [[v v'] op-value]
+                 (cond (and (not (nil? op-version))
+                            (not= version' op-version))
+                       (model/inconsistent
+                         (str "can't go from version " version " to "
+                              op-version))
+
+                       (not= value v)
+                       (model/inconsistent (str "can't CAS " value " from " v
+                                                " to " v'))
+
+                       true
+                       (VersionedRegister. version' v')))
+
+        :read (cond (and (not (nil? op-version))
+                         (not= version op-version))
+                    (model/inconsistent
+                      (str "can't read version " op-version " from version "
+                           version))
+
+                    (and (not (nil? op-value))
+                         (not= value op-value))
+                    (model/inconsistent
+                      (str "can't read " op-value " from register " value))
+
+                    true
+                    model)))))
+
+(defn r   [_ _] {:type :invoke, :f :read, :value [nil nil]})
+(defn w   [_ _] {:type :invoke, :f :write, :value [nil (rand-int 5)]})
+(defn cas [_ _] {:type :invoke, :f :cas, :value [nil [(rand-int 5) (rand-int 5)]]})
 
 (defn workload
   "Tests linearizable reads, writes, and compare-and-set operations on
@@ -57,11 +107,12 @@
    :checker   (independent/checker
                 (checker/compose
                   {:linear   (checker/linearizable
-                               {:model (model/cas-register)})
+                               {:model (->VersionedRegister 0 nil)})
                    :timeline (timeline/html)}))
    :generator (independent/concurrent-generator
                 10
                 (range)
                 (fn [k]
-                  (->> (gen/mix [r w cas])
+                  (->> (gen/mix [w cas])
+                       (gen/reserve 5 r)
                        (gen/limit (:ops-per-key opts)))))})

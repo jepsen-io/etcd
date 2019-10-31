@@ -121,13 +121,13 @@
    ["-w" "--workload NAME" "What workload should we run?"
     :missing  (str "--workload " (cli/one-of workloads))
     :validate [workloads (cli/one-of workloads)]]
-   ["-q" "--quorum" "Use quorum reads, instead of reading from any primary."]
+   ["-s" "--serializable" "Use serializable reads, instead of going through consensus."]
    ["-r" "--rate HZ" "Approximate number of requests per second, per thread."
     :default  10
     :parse-fn read-string
     :validate [#(and (number? %) (pos? %)) "Must be a positive number"]]
    [nil "--ops-per-key NUM" "Maximum number of operations on any given key."
-    :default  100
+    :default  200
     :parse-fn parse-long
     :validate [pos? "Must be a positive integer."]]])
 

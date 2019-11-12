@@ -14,6 +14,7 @@
             [jepsen.control.util :as cu]
             [jepsen.os.debian :as debian]
             [jepsen.etcd [client :as ec]
+                         [lock :as lock]
                          [register :as register]
                          [set :as set]
                          [support :as s]]
@@ -71,7 +72,8 @@
 
 (def workloads
   "A map of workload names to functions that construct workloads, given opts."
-  {"set"      set/workload
+  {"lock"     lock/workload
+   "set"      set/workload
    "register" register/workload})
 
 (defn etcd-test
@@ -92,7 +94,8 @@
             :serializable serializable
             :os         debian/os
             :db         (db)
-            :nemesis    nemesis/noop ;(nemesis/partition-random-halves)
+            :nemesis    nemesis/noop
+;            :nemesis    (nemesis/partition-random-halves)
             :checker    (checker/compose
                           {:perf        (checker/perf)
                            :stats       (checker/stats)

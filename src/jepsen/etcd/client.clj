@@ -1,6 +1,6 @@
 (ns jepsen.etcd.client
   "Client library wrapper for jetcd"
-  (:refer-clojure :exclude [get swap!])
+  (:refer-clojure :exclude [await get swap!])
   (:require [clojure.tools.logging :refer [info warn]]
             [jepsen.etcd [support :as support]]
             [jepsen.etcd.client.txn :as t]
@@ -12,13 +12,21 @@
                           Client
                           ClientBuilder
                           CloseableClient
+                          Lease
+                          Lock
                           KeyValue
                           KV
                           Response
                           Response$Header)
+           (io.etcd.jetcd.common.exception ClosedClientException)
            (io.etcd.jetcd.kv GetResponse
                              PutResponse
                              TxnResponse)
+           (io.etcd.jetcd.lease LeaseGrantResponse
+                                LeaseKeepAliveResponse
+                                LeaseRevokeResponse)
+           (io.etcd.jetcd.lock LockResponse
+                               UnlockResponse)
            (io.etcd.jetcd.op Cmp
                              Cmp$Op
                              Op
@@ -27,7 +35,13 @@
            (io.etcd.jetcd.options GetOption
                                   PutOption)
            (io.grpc Status$Code
-                    StatusRuntimeException)))
+                    StatusRuntimeException)
+           (io.grpc.stub StreamObserver)))
+
+(def timeout
+  "A default timeout, in ms."
+  5000)
+
 ; Serialization
 
 (def ->bytes t/->bytes)
@@ -42,6 +56,12 @@
 
   ByteSequence (->clj [bs] (bytes-> bs))
 
+  GetResponse (->clj [r]
+                {:count  (.getCount r)
+                 :kvs    (into {} (map ->clj (.getKvs r)))
+                 :more?  (.isMore r)
+                 :header (->clj (.getHeader r))})
+
   KeyValue (->clj [kv]
              (clojure.lang.MapEntry. (->clj (.getKey kv))
                                      {:value            (->clj (.getValue kv))
@@ -49,21 +69,32 @@
                                       :create-revision  (.getCreateRevision kv)
                                       :mod-revision     (.getModRevision kv)}))
 
-  Response$Header (->clj [h]
-                    {:member-id (.getMemberId h)
-                     :revision  (.getRevision h)
-                     :raft-term (.getRaftTerm h)})
+  LeaseGrantResponse (->clj [r]
+                       {:header (->clj (.getHeader r))
+                        :id     (.getID r)
+                        :ttl    (.getTTL r)})
 
-  GetResponse (->clj [r]
-                {:count  (.getCount r)
-                 :kvs    (into {} (map ->clj (.getKvs r)))
-                 :more?  (.isMore r)
-                 :header (->clj (.getHeader r))})
+  LeaseKeepAliveResponse (->clj [r]
+                           {:header (->clj (.getHeader r))
+                            :id     (.getID r)
+                            :ttl    (.getTTL r)})
+
+  LeaseRevokeResponse (->clj [r]
+                        {:header (->clj (.getHeader r))})
+
+  LockResponse (->clj [r]
+                 {:header (->clj (.getHeader r))
+                  :key    (.getKey r)})
 
   PutResponse (->clj [r]
                 {:prev-kv   (->clj (.getPrevKv r))
                  :prev-kv?  (.hasPrevKv r)
                  :header    (->clj (.getHeader r))})
+
+  Response$Header (->clj [h]
+                    {:member-id (.getMemberId h)
+                     :revision  (.getRevision h)
+                     :raft-term (.getRaftTerm h)})
 
   TxnResponse (->clj [r]
                 {:succeeded? (.isSucceeded r)
@@ -71,6 +102,9 @@
                  :puts       (map ->clj (.getPutResponses r))
                  :txns       (map ->clj (.getTxnResponses r))
                  :header     (->clj (.getHeader r))})
+
+  UnlockResponse (->clj [r]
+                   {:header (->clj (.getHeader r))})
   )
 
 ; Opening and closing clients
@@ -86,9 +120,22 @@
       (build)))
 
 (defn close!
-  "Closes any client"
+  "Closes any client. Ignores ClosedClientExceptions."
   [^AutoCloseable c]
-  (.close c))
+  (try
+    (.close c)
+    (catch ClosedClientException e
+      :already-closed)))
+
+; Futures
+(defn await
+  "Derefences a future, using a default timeout, and throwing a slingshot
+  exception of :type :timeout if it times out."
+  [future]
+  (let [r (deref future timeout ::timeout)]
+    (if (= ::timeout r)
+      (throw+ {:type :timeout})
+      r)))
 
 ; Error handling
 
@@ -120,6 +167,9 @@
       Status$Code/UNAVAILABLE
       (assoc op :type crash, :error [:unavailable desc])
 
+      Status$Code/NOT_FOUND
+      (assoc op :type :fail, :error [:not-found desc])
+
       ; Fall back to regular expressions on status messages
       (do (info "Unknown error status code" (.getCode status) "-" status "-" e)
           (condp re-find (.getMessage e)
@@ -129,9 +179,13 @@
   "Takes an operation, a set of op types which are idempotent, and evals body,
   converting known exceptions to :fail or :info return ops."
   [op idempotent & body]
-  `(try (unwrap-exceptions ~@body)
-        (catch StatusRuntimeException e#
-          (status-exception->op e# ~op ~idempotent))))
+  `(try+ (unwrap-exceptions ~@body)
+         (catch StatusRuntimeException e#
+           (status-exception->op e# ~op ~idempotent))
+         (catch [:type :timeout] e#
+           (assoc ~op
+                  :type (if (~idempotent (:f ~op)) :fail :info)
+                  :error :timeout))))
 
 ; KV ops
 
@@ -145,7 +199,7 @@
   [c k v]
   (-> c kv-client
       (.put (->bytes k) (->bytes v) t/put-option-with-prev-kv)
-      .get
+      await
       ->clj))
 
 (defn get-options
@@ -166,7 +220,7 @@
   ([c k opts]
    (-> c kv-client
        (.get (->bytes k) (get-options opts))
-       .get
+       await
        ->clj)))
 
 (defn get
@@ -190,14 +244,14 @@
   ([c test t-branch]
    (txn! c test t-branch nil))
   ([c test t f]
-   (->clj
-     (.. (kv-client c)
-         (txn)
-         (If   (into-array Cmp (coll test)))
-         (Then (into-array Op  (coll t)))
-         (Else (into-array Op  (coll f)))
-         (commit)
-         (get)))))
+   (-> (.. (kv-client c)
+           (txn)
+           (If   (into-array Cmp (coll test)))
+           (Then (into-array Op  (coll t)))
+           (Else (into-array Op  (coll f)))
+           (commit))
+       await
+       ->clj)))
 
 (defn cas*!
   "Like cas!, but raw; returns full txn response map."
@@ -240,3 +294,45 @@
         value'
         (do (Thread/sleep (swap-retry-delay))
             (recur))))))
+
+(defn ^Lease lease-client
+  "Gets a lease client from a client."
+  [^Client c]
+  (.getLeaseClient c))
+
+(defn grant-lease!
+  "Grants a lease on a client, with the given TTL in seconds."
+  [c ^long ttl]
+  (-> c lease-client (.grant ttl) await ->clj))
+
+(defn revoke-lease!
+  "Revokes a lease."
+  [c ^long lease-id]
+  (-> c lease-client (.revoke lease-id) await ->clj))
+
+(defn keep-lease-alive!
+  "Keeps a lease alive forever. Returns a ClosableClient. I don't really think
+  this means FOREVER, but the API docs are super unclear. I assume we call
+  .close to stop sending keepalives?"
+  [c ^long lease-id]
+  (let [observer (reify StreamObserver
+                   (onNext [this v]     (info :onNext lease-id (->clj v)))
+                   (onError [this t]    (info t :onError lease-id))
+                   (onCompleted [this]  (info :onCompleted lease-id)))]
+    (-> c lease-client
+        (.keepAlive lease-id observer))))
+
+(defn ^Lock lock-client
+  "Gets a lock client from a client."
+  [^Client c]
+  (.getLockClient c))
+
+(defn acquire-lock!
+  "Acquires a lock with the given name and lease ID."
+  [c name ^long lease-id]
+  (-> c lock-client (.lock (->bytes name) lease-id) await ->clj))
+
+(defn release-lock!
+  "Releases a lock with the given lock ownership key."
+  [c ^ByteSequence lock-key]
+  (-> c lock-client (.unlock lock-key) await ->clj))

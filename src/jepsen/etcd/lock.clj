@@ -14,6 +14,10 @@
             [slingshot.slingshot :refer [try+]])
   (:import (knossos.model Model)))
 
+(def lease-ttl
+  "Lease time, in seconds"
+  3)
+
 (defn acquire!
   "Lock aquisition in etcd requires acquiring and preserving a lease, and
   maintaining the lease out-of-band with the use of the lock; e.g. via a
@@ -26,7 +30,7 @@
    :lock-key
    :process}"
   [conn lock-name process]
-  (let [lease-id (-> conn (c/grant-lease! 10) :id)
+  (let [lease-id (-> conn (c/grant-lease! lease-ttl) :id)
         listener (c/keep-lease-alive! conn lease-id)]
     (info :lease-id lease-id :listener listener)
     (try

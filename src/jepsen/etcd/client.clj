@@ -182,6 +182,8 @@
   `(try+ (unwrap-exceptions ~@body)
          (catch StatusRuntimeException e#
            (status-exception->op e# ~op ~idempotent))
+         (catch java.net.ConnectException e#
+           (assoc ~op :type :fail, :error [:connect-timeout (.getMessage e#)]))
          (catch [:type :timeout] e#
            (assoc ~op
                   :type (if (~idempotent (:f ~op)) :fail :info)

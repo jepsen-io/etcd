@@ -192,6 +192,12 @@
       Status$Code/NOT_FOUND
       (assoc op :type :fail, :error [:not-found desc])
 
+      Status$Code/UNKNOWN
+      (condp re-find desc
+        #"leader changed" (assoc op :type crash, :error :leader-changed)
+        (do (info "Unknown code=UNKNOWN description" (pr-str desc))
+            (throw e)))
+
       ; Fall back to regular expressions on status messages
       (do (info "Unknown error status code" (.getCode status) "-" status "-" e)
           (condp re-find (.getMessage e)

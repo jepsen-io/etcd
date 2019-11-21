@@ -43,8 +43,8 @@
         db            (db/db)
         nemesis       (nemesis/nemesis-package
                         {:db        db
-                         :faults    [:pause :partition]
-                         :partition {:targets [:majority]}
+                         :faults    [:partition]
+                         :partition {:targets [:primaries]}
                          :pause     {:targets [:primaries]}
                          :interval  5})]
     (merge tests/noop-test

@@ -25,6 +25,7 @@
 (def workloads
   "A map of workload names to functions that construct workloads, given opts."
   {"lock"     lock/workload
+   "lock-set" lock/set-workload
    "set"      set/workload
    "register" register/workload})
 

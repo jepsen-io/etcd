@@ -16,7 +16,7 @@
 
 (def lease-ttl
   "Lease time, in seconds"
-  3)
+  2)
 
 (defn acquire!
   "Lock aquisition in etcd requires acquiring and preserving a lease, and
@@ -130,6 +130,51 @@
                          :time    (relative-time-nanos)}))
     (c/close! conn)))
 
+; This client keeps a mutable vector of integers in memory, and uses an etcd
+; lock to protect read-modify-write updates to them. Latency is roughly how
+; long these updates take, in ms.
+(defrecord LockingSetClient [conn lock-name latency set]
+  client/Client
+  (open! [this test node]
+    (assoc this :conn (c/client node)))
+
+  (setup! [this test])
+
+  (invoke! [_ test op]
+    ; Note that we use the normal client/with-errors macro here; the
+    ; with-errors macro in this ns is intended specifically for the
+    ; linearizable client where acquires and releases are separate operations.
+    (let [added? (atom false)
+          r (c/with-errors op #{:read}
+              (case (:f op)
+                :read (assoc op :type :ok, :value @set)
+
+                :add  (let [process     (:process op)
+                            ; Lock!
+                            lease+lock  (acquire! conn lock-name process)
+                            ; Perform read, modify, and write, over time.
+                            v           @set
+                            _           (Thread/sleep (rand-int (* 2 latency)))
+                            _           (reset! set (conj v (:value op)))
+                            ; Record that we added the value.
+                            _           (reset! added? true)
+                            ; And release lock
+                            _           (release! conn lease+lock)]
+                        (assoc op :type :ok))))]
+      ; Note that we could get all kinds of failures in the locking process,
+      ; but logically, our add *effects* just depend on whether we did the
+      ; in-memory write. We preserve the :error if this happens, but as far as
+      ; Jepsen's model is concerned, the :ok state only depends on whether that
+      ; add took place.
+      (if (= :add (:f op))
+        (assoc r :type (if @added? :ok :fail))
+        r)))
+
+  (teardown! [this test])
+
+  (close! [_ test]
+    (c/close! conn)))
+
 (defn acquires
   []
   {:type :invoke, :f :acquire})
@@ -139,14 +184,26 @@
   {:type :invoke, :f :release})
 
 (defn workload
-  "Tests linearizable reads, writes, and compare-and-set operations on
-  independent keys."
+  "Tests linearizable acquires and releases on a single lock."
   [opts]
-  {:client    (map->LinearizableLockClient
-                {:conn            nil
-                 :lock-name       "foo"
-                 :lease+lock      nil})
+  {:client    (map->LinearizableLockClient {:lock-name       "foo"
+                                            :lease+lock      nil})
    :checker   (checker/compose
                 {:linear   (checker/linearizable {:model (model/mutex)})
                  :timeline (timeline/html)})
    :generator (gen/mix [(acquires) (releases)])})
+
+(defn set-workload
+  "Tests mutating an in-memory set."
+  [opts]
+  (let [adds (->> (range)
+                  (map (fn [x] {:type :invoke, :f :add, :value x}))
+                  gen/seq)
+        reads {:type :invoke, :f :read}]
+    {:client    (map->LockingSetClient {:lock-name    "foo"
+                                        :latency      100
+                                        :set          (atom [])})
+    :checker    (checker/compose
+                  {:set (checker/set-full {:linearizable? true})
+                   :timeline (timeline/html)})
+    :generator  (gen/mix [adds reads])}))

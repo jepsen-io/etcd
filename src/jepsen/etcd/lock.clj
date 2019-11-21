@@ -201,7 +201,7 @@
                   gen/seq)
         reads {:type :invoke, :f :read}]
     {:client    (map->LockingSetClient {:lock-name    "foo"
-                                        :latency      100
+                                        :latency      1000
                                         :set          (atom [])})
     :checker    (checker/compose
                   {:set (checker/set-full {:linearizable? true})

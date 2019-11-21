@@ -7,18 +7,23 @@
             [jepsen.util :refer [coll]]
             [slingshot.slingshot :refer [try+ throw+]])
   (:import (java.lang AutoCloseable)
+           (java.net URI)
            (java.nio.charset Charset)
            (io.etcd.jetcd ByteSequence
                           Client
                           ClientBuilder
                           CloseableClient
-                          Lease
-                          Lock
+                          Cluster
                           KeyValue
                           KV
+                          Lease
+                          Lock
+                          Maintenance
                           Response
                           Response$Header)
            (io.etcd.jetcd.common.exception ClosedClientException)
+           (io.etcd.jetcd.cluster Member
+                                  MemberListResponse)
            (io.etcd.jetcd.kv GetResponse
                              PutResponse
                              TxnResponse)
@@ -27,6 +32,7 @@
                                 LeaseRevokeResponse)
            (io.etcd.jetcd.lock LockResponse
                                UnlockResponse)
+           (io.etcd.jetcd.maintenance StatusResponse)
            (io.etcd.jetcd.op Cmp
                              Cmp$Op
                              Op
@@ -86,6 +92,14 @@
                  {:header (->clj (.getHeader r))
                   :key    (.getKey r)})
 
+  Member (->clj [r]
+           {:name (.getName r)
+            :id   (.getId r)})
+
+  MemberListResponse (->clj [r]
+                       {:header (->clj (.getHeader r))
+                        :members (map ->clj (.getMembers r))})
+
   PutResponse (->clj [r]
                 {:prev-kv   (->clj (.getPrevKv r))
                  :prev-kv?  (.hasPrevKv r)
@@ -95,6 +109,14 @@
                     {:member-id (.getMemberId h)
                      :revision  (.getRevision h)
                      :raft-term (.getRaftTerm h)})
+
+  StatusResponse (->clj [r]
+                   {:db-size      (.getDbSize r)
+                    :leader       (.getLeader r)
+                    :raft-index   (.getRaftIndex r)
+                    :raft-term    (.getRaftTerm r)
+                    :version      (.getVersion r)
+                    :header       (->clj (.getHeader r))})
 
   TxnResponse (->clj [r]
                 {:succeeded? (.isSucceeded r)
@@ -338,3 +360,33 @@
   "Releases a lock with the given lock ownership key."
   [c ^ByteSequence lock-key]
   (-> c lock-client (.unlock lock-key) await ->clj))
+
+(defn ^Cluster cluster-client
+  "Gets a cluster client for a client."
+  [^Client client]
+  (.getClusterClient client))
+
+(defn list-members
+  "Lists all members of a cluster."
+  [client]
+  (-> client cluster-client .listMember await ->clj))
+
+(defn ^Maintenance maintenance-client
+  "Gets a maintenance client for a client."
+  [^Client client]
+  (.getMaintenanceClient client))
+
+(defn member-status
+  "Returns the status of a particular node, identified by node name."
+  [client node]
+  (-> client
+      maintenance-client
+      (.statusMember (URI/create (support/peer-url node)))
+      await
+      ->clj))
+
+(defn await-node-ready
+  "Blocks until this node is responding to queries."
+  [client]
+  (-> client cluster-client .listMember (.get))
+  true)

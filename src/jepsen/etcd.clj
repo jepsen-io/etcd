@@ -41,10 +41,12 @@
         workload-name (:workload opts)
         workload      ((workloads workload-name) opts)
         db            (db/db)
-        nemesis       (nemesis/nemesis+generators
-                        (assoc opts
-                               :db        db
-                               :interval  5))]
+        nemesis       (nemesis/nemesis-package
+                        {:db        db
+                         :faults    [:pause :partition]
+                         :partition {:targets [:majority]}
+                         :pause     {:targets [:primaries]}
+                         :interval  5})]
     (merge tests/noop-test
            opts
            {:name       (str "etcd " workload-name " s=" serializable)

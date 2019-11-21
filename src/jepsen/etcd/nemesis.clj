@@ -10,7 +10,7 @@
             [jepsen.nemesis.combined :as nc]
             [jepsen.etcd.db :as db]))
 
-(defn nemesis+generators
+(defn nemesis-package
   "Constructs a nemesis and generators for etcd."
   [opts]
-  (nc/nemesis+generators opts))
+  (nc/nemesis-package opts))

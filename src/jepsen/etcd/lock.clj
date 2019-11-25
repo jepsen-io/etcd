@@ -10,6 +10,7 @@
                     [util :as util :refer [meh relative-time-nanos]]]
             [jepsen.checker.timeline :as timeline]
             [jepsen.etcd [client :as c]]
+            [jepsen.etcd.client.txn :as t]
             [knossos.model :as model]
             [slingshot.slingshot :refer [try+]])
   (:import (knossos.model Model)))
@@ -175,6 +176,55 @@
   (close! [_ test]
     (c/close! conn)))
 
+; This client keeps a mutable vector of numbers in an etcd key, and uses an
+; etcd lock + transactions to protect read-modify-write updates to them.
+; Latency is roughly how long these updates take, in ms. k is the key we store
+; our set in.
+(defrecord LockingEtcdSetClient [conn lock-name latency k]
+  client/Client
+  (open! [this test node]
+    (assoc this :conn (c/client node)))
+
+  (setup! [this test])
+
+  (invoke! [_ test op]
+    (case (:f op)
+      :read
+      (c/with-errors op #{:read}
+        (let [v (:value (c/get conn k {:serializable? (:serializable test)}))]
+          (assoc op :type :ok :value v)))
+
+      :add
+      ; This with-errors catches errors from the lock acquisition; if we fail
+      ; at this stage, we know the mutation didn't actually happen, and can
+      ; declare a known failure.
+      (c/with-errors op #{:add}
+        (let [process     (:process op)
+              ; Lock!
+              lease+lock  (acquire! conn lock-name process)]
+          ; This with-errors catches errors from the actual mutation, which is
+          ; why we let it return :info results.
+          (try (c/with-errors op #{}
+                 ; Perform read, modify, and write, over time.
+                 (let [v  (:value (c/get conn k) [])
+                       _  (info :lock-state (:lock-key lease+lock) (c/get* conn (:lock-key lease+lock)))
+                       _  (Thread/sleep (rand-int (* 2 latency)))
+                       r  (c/txn! conn
+                                  (t/> (:lock-key lease+lock) (t/version 0))
+                                  [(t/put k (conj v (:value op)))])]
+                   ; If we get here, we definitely know whether the CAS
+                   ; succeeded or failed.
+                   (assoc op :type (if (:succeeded? r) :ok :fail))))
+               (finally
+                 ; Doesn't matter whether this throws or not; it's just for
+                 ; politeness.
+                 (meh (release! conn lease+lock))))))))
+
+  (teardown! [this test])
+
+  (close! [_ test]
+    (c/close! conn)))
+
 (defn acquires
   []
   {:type :invoke, :f :acquire})
@@ -207,3 +257,11 @@
                   {:set (checker/set-full {:linearizable? true})
                    :timeline (timeline/html)})
     :generator  (gen/mix [adds reads])}))
+
+(defn etcd-set-workload
+  "Tests mutating a set in etcd."
+  [opts]
+  (assoc (set-workload opts) :client
+         (map->LockingEtcdSetClient {:lock-name    "foo"
+                                     :k            "a-set"
+                                     :latency      1000})))

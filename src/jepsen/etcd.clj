@@ -24,10 +24,11 @@
 
 (def workloads
   "A map of workload names to functions that construct workloads, given opts."
-  {"lock"     lock/workload
-   "lock-set" lock/set-workload
-   "set"      set/workload
-   "register" register/workload})
+  {"lock"           lock/workload
+   "lock-set"       lock/set-workload
+   "lock-etcd-set"  lock/etcd-set-workload
+   "set"            set/workload
+   "register"       register/workload})
 
 (defn etcd-test
   "Given an options map from the command line runner (e.g. :nodes, :ssh,
@@ -44,7 +45,7 @@
         db            (db/db)
         nemesis       (nemesis/nemesis-package
                         {:db        db
-                         :faults    [:partition]
+                         :faults    [:pause]
                          :partition {:targets [:primaries]}
                          :pause     {:targets [:primaries]}
                          :interval  5})]

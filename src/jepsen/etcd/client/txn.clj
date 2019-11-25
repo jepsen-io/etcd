@@ -27,7 +27,9 @@
 (defn ^ByteSequence ->bytes
   "Coerces any object to a ByteSequence"
   [x]
-  (ByteSequence/from (codec/encode x)))
+  (if (instance? ByteSequence x)
+    x
+    (ByteSequence/from (codec/encode x))))
 
 (defn bytes->
   "Coerces a ByteSequence to any object"
@@ -57,7 +59,7 @@
 (defn value
   "A comparison target by value."
   [v]
-  (CmpTarget/value (str->bytes v)))
+  (CmpTarget/value (->bytes v)))
 
 (defn mod-revision
   "A comparison target by modification revision."

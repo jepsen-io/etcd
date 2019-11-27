@@ -45,14 +45,18 @@
         db            (db/db)
         nemesis       (nemesis/nemesis-package
                         {:db        db
-                         :faults    [:pause]
+                         :faults    [:member]
+                         ;:faults    [:partition :pause :kill]
                          :partition {:targets [:primaries]}
-                         :pause     {:targets [:primaries]}
-                         :interval  5})]
+                         :pause     {:targets [:primaries :all]}
+                         :kill      {:targets [:primaries :all]}
+                         :interval  20})]
     (merge tests/noop-test
            opts
            {:name       (str "etcd " workload-name " s=" serializable)
             :serializable serializable
+            :initialized? (atom false)
+            :members    (atom (into (sorted-set) (:nodes opts)))
             :os         debian/os
             :db         (db/db)
             :nemesis    (:nemesis nemesis)

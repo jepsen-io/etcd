@@ -1,7 +1,8 @@
 (ns jepsen.etcd.client
   "Client library wrapper for jetcd"
   (:refer-clojure :exclude [await get swap!])
-  (:require [clojure.tools.logging :refer [info warn]]
+  (:require [clojure.core :as c]
+            [clojure.tools.logging :refer [info warn]]
             [jepsen.etcd [support :as support]]
             [jepsen.etcd.client.txn :as t]
             [jepsen.util :refer [coll]]
@@ -23,7 +24,9 @@
                           Response$Header)
            (io.etcd.jetcd.common.exception ClosedClientException)
            (io.etcd.jetcd.cluster Member
-                                  MemberListResponse)
+                                  MemberAddResponse
+                                  MemberListResponse
+                                  MemberRemoveResponse)
            (io.etcd.jetcd.kv GetResponse
                              PutResponse
                              TxnResponse)
@@ -96,9 +99,18 @@
            {:name (.getName r)
             :id   (.getId r)})
 
+  MemberAddResponse (->clj [r]
+                      {:header (->clj (.getHeader r))
+                       :member (->clj (.getMember r))
+                       :members (map ->clj (.getMembers r))})
+
   MemberListResponse (->clj [r]
                        {:header (->clj (.getHeader r))
                         :members (map ->clj (.getMembers r))})
+
+  MemberRemoveResponse (->clj [r]
+                         {:header (->clj (.getHeader r))
+                          :members (map ->clj (.getMembers r))})
 
   PutResponse (->clj [r]
                 {:prev-kv   (->clj (.getPrevKv r))
@@ -148,6 +160,14 @@
     (.close c)
     (catch ClosedClientException e
       :already-closed)))
+
+(defmacro with-client
+  "Opens a client for node, evaluates block with client-sym bound, closes
+  client."
+  [[client-sym node] & body]
+  `(let [~client-sym (client ~node)]
+    (try ~@body
+         (finally (close! ~client-sym)))))
 
 ; Futures
 (defn await
@@ -376,6 +396,46 @@
   "Lists all members of a cluster."
   [client]
   (-> client cluster-client .listMember await ->clj))
+
+(defn nodes->member-ids
+  "Looks up a map of node IDS to member IDs."
+  [client]
+  (->> (list-members client)
+       :members
+       (map (juxt :name :id))
+       (into {})))
+
+(defn member-id
+  "Looks up the member ID for a node. Throws if this node is not a member."
+  [client node]
+  (let [ids (nodes->member-ids client)]
+    (or (c/get ids node)
+        (throw+ {:type    ::no-such-member
+                 :node    node
+                 :members ids}))))
+
+(defn add-member!
+  "Adds one or more nodes to the cluster."
+  [client node-or-nodes]
+  (-> client
+      cluster-client
+      (.addMember (map #(URI/create (support/peer-url %)) (coll node-or-nodes)))
+      await
+      ->clj))
+
+(defn remove-member-by-id!
+  "Removes a single member from the cluster, by node ID."
+  [client member-id]
+  (-> client
+      cluster-client
+      (.removeMember member-id)
+      await
+      ->clj))
+
+(defn remove-member!
+  "Removes a single member from the cluster."
+  [client node]
+  (remove-member-by-id! client (member-id client node)))
 
 (defn ^Maintenance maintenance-client
   "Gets a maintenance client for a client."

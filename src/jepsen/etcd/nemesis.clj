@@ -39,9 +39,11 @@
   [opts]
   {:nemesis   (member-nemesis opts)
    :generator (member-generator opts)
-   :perf      #{{:name  :grow
+   :perf      #{{:name  "grow"
+                 :fs    [:grow]
                  :color "#E9A0E6"}
-                {:name  :shrink
+                {:name  "shrink"
+                 :fs    [:shrink]
                  :color "#ACA0E9"}}})
 
 (defn nemesis-package

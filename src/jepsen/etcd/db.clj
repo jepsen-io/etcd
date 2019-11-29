@@ -29,18 +29,31 @@
   "Given a test and a node, returns a map of {:primary node :term term}, based
   on what this node thinks is the primary."
   [test node]
-  (let [c (client/client node)]
-    (try
-      ; Build an index mapping node ids to node names
-      (let [ids->nodes (->> (client/list-members c)
-                            :members
-                            (map (juxt :id :name))
-                            (into {}))
-            status (client/member-status c node)
-            primary (-> status :leader ids->nodes)]
-        {:primary primary
-         :term    (:raft-term status)})
-      (finally (client/close! c)))))
+  (client/with-client [c node]
+    ; Build an index mapping node ids to node names
+    (let [ids->nodes (->> (client/list-members c)
+                          :members
+                          (map (juxt :id :name))
+                          (into {}))
+          status (client/member-status c node)
+          primary (-> status :leader ids->nodes)]
+      {:primary primary
+       :term    (:raft-term status)})))
+
+(defn from-highest-term
+  "Takes a test and a function of a client. Evaluates that function with a
+  client bound to each node in parallel, and returns the response with the
+  highest term."
+  [test f]
+  (->> (:nodes test)
+       (real-pmap (fn [node]
+                    (try+
+                      (client/remap-errors
+                        (client/with-client [c node] (f c)))
+                      (catch client/client-error? e nil))))
+       (remove nil?)
+       (sort-by (comp :raft-term :header))
+       last))
 
 (defn primary
   "Picks the highest primary by term"
@@ -86,19 +99,6 @@
                                                               :existing)
       :--initial-advertise-peer-urls  (s/peer-url node)
       :--initial-cluster              (initial-cluster (:nodes opts)))))
-
-(defn from-highest-term
-  "Takes a test and a function of a client. Evaluates that function with a
-  client bound to each node in parallel, and returns the response with the
-  highest term."
-  [test f]
-  (->> (:nodes test)
-       (real-pmap (fn [node]
-                    (client/with-client [c node]
-                      (meh (f c)))))
-       (remove (partial instance? Throwable))
-       (sort-by (comp :raft-term :header))
-       last))
 
 (defn members
   "Takes a test, asks all nodes for their membership, and returns the highest

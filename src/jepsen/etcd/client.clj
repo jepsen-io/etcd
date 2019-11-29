@@ -176,7 +176,8 @@
   [future]
   (let [r (deref future timeout ::timeout)]
     (if (= ::timeout r)
-      (throw+ {:type :timeout})
+      (throw+ {:type      :timeout
+               :definite? false})
       r)))
 
 ; Error handling
@@ -196,46 +197,72 @@
        (catch java.util.concurrent.ExecutionException e#
          (throw (original-cause e#)))))
 
-(defn status-exception->op
-  "Takes a status exception, an op, and a set of idempotent op :f's. Returns
-  op with an appropriate :type (e.g. :info, :fail), and an :error for
-  recognized statuses."
-  [e op idempotent]
-  (let [crash  (if (idempotent (:f op)) :fail :info)
-        status (.getStatus e)
-        desc   (.getDescription status)]
-    ; lmao, can't use a case statement here for... reasons
-    (condp = (.getCode status)
-      Status$Code/UNAVAILABLE
-      (assoc op :type crash, :error [:unavailable desc])
+(defmacro remap-errors
+  "Evaluates body, converting errors to thrown Slingshot maps with fields:
 
-      Status$Code/NOT_FOUND
-      (assoc op :type :fail, :error [:not-found desc])
+      :type         A keyword classifying the error
+      :description  A descriptive object, e.g. a string
+      :definite?    Is this error definitely a failure, or could it be ok?"
+  [& body]
+  `(try+ (unwrap-exceptions ~@body)
+         (catch StatusRuntimeException e#
+           (throw+
+             (let [status# (.getStatus e#)
+                   desc#   (.getDescription status#)]
+               ; lmao, can't use a case statement here for ~reasons~
+               (condp = (.getCode status#)
+                 Status$Code/UNAVAILABLE
+                 {:definite? false, :type :unavailable, :description desc#}
 
-      Status$Code/UNKNOWN
-      (condp re-find desc
-        #"leader changed" (assoc op :type crash, :error :leader-changed)
-        (do (info "Unknown code=UNKNOWN description" (pr-str desc))
-            (throw e)))
+                 Status$Code/NOT_FOUND
+                 {:definite? true, :type :not-found, :description desc#}
 
-      ; Fall back to regular expressions on status messages
-      (do (info "Unknown error status code" (.getCode status) "-" status "-" e)
-          (condp re-find (.getMessage e)
-            (throw e))))))
+                 Status$Code/UNKNOWN
+                 (condp re-find desc#
+                   #"leader changed"
+                   {:definite? false, :type :leader-changed}
+
+                   (do (info "Unknown code=UNKNOWN description" (pr-str desc#))
+                       e#))
+
+                 ; Fall back to regular expressions on status messages
+                 (do (info "Unknown error status code" (.getCode status#)
+                           "-" status# "-" e#)
+                     (condp re-find (.getMessage e#)
+                       e#))))))
+
+         (catch java.net.ConnectException e#
+           (throw+ {:definite?   true
+                    :type        :connect-timeout
+                    :description (.getMessage e#)}))
+
+         (catch java.io.IOException e#
+           (throw+
+             (condp re-find (.getMessage e#)
+               #"Connection reset by peer"
+               {:definite? false, :type :connection-reset}
+
+               e#)))))
+
+(defn client-error?
+  "Returns true if this is a client error we know how to interpret. Useful as a
+  try+ predicate."
+  [m]
+  (and (map? m)
+       (contains? m :definite?)))
 
 (defmacro with-errors
   "Takes an operation, a set of op types which are idempotent, and evals body,
   converting known exceptions to :fail or :info return ops."
   [op idempotent & body]
-  `(try+ (unwrap-exceptions ~@body)
-         (catch StatusRuntimeException e#
-           (status-exception->op e# ~op ~idempotent))
-         (catch java.net.ConnectException e#
-           (assoc ~op :type :fail, :error [:connect-timeout (.getMessage e#)]))
-         (catch [:type :timeout] e#
+  `(try+ (remap-errors ~@body)
+         (catch client-error? e#
            (assoc ~op
-                  :type (if (~idempotent (:f ~op)) :fail :info)
-                  :error :timeout))))
+                  :type (if (or (:definite? e#)
+                                (~idempotent (:f ~op)))
+                          :fail
+                          :info)
+                  :error [(:type e#) (:description e#)]))))
 
 ; KV ops
 

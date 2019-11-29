@@ -45,12 +45,12 @@
         db            (db/db)
         nemesis       (nemesis/nemesis-package
                         {:db        db
-                         :faults    [:member]
+                         :faults    [:kill :member]
                          ;:faults    [:partition :pause :kill]
                          :partition {:targets [:primaries]}
                          :pause     {:targets [:primaries :all]}
                          :kill      {:targets [:primaries :all]}
-                         :interval  20})]
+                         :interval  10})]
     (merge tests/noop-test
            opts
            {:name       (str "etcd " workload-name " s=" serializable)

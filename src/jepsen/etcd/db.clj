@@ -99,9 +99,8 @@
                      (map :name)
                      set)]
     (if (some str/blank? members)
-      (do (info "Member has a blank name; waiting for etcd to heal")
-          (Thread/sleep 1000)
-          (recur test))
+      (throw+ {:type    ::blank-member-name
+               :members raw-members})
       (do (info "Current membership is" (pr-str members))
           (reset! (:members test) members)))))
 

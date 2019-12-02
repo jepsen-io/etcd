@@ -47,10 +47,10 @@
                         {:db        db
                          ;:faults    [:member]
                          :faults    [:partition :pause :kill :member]
-                         :partition {:targets [:primaries]}
+                         :partition {:targets [:primaries :majority :majorities-ring]}
                          :pause     {:targets [:primaries :all]}
                          :kill      {:targets [:primaries :all]}
-                         :interval  10})]
+                         :interval  5})]
     (merge tests/noop-test
            opts
            {:name       (str "etcd " workload-name " s=" serializable)

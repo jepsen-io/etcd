@@ -12,7 +12,7 @@
             [jepsen.os.debian :as debian]
             [jepsen.etcd [client :as client]
                          [support :as s]]
-            [slingshot.slingshot :refer [try+]]))
+            [slingshot.slingshot :refer [throw+ try+]]))
 
 (def dir "/opt/etcd")
 (def binary "etcd")
@@ -25,47 +25,30 @@
   (c/su
     (c/exec :rm :-rf (str dir "/" node ".etcd"))))
 
-(defn primary+term
-  "Given a test and a node, returns a map of {:primary node :term term}, based
-  on what this node thinks is the primary."
-  [test node]
-  (client/with-client [c node]
-    ; Build an index mapping node ids to node names
-    (let [ids->nodes (->> (client/list-members c)
-                          :members
-                          (map (juxt :id :name))
-                          (into {}))
-          status (client/member-status c node)
-          primary (-> status :leader ids->nodes)]
-      {:primary primary
-       :term    (:raft-term status)})))
-
 (defn from-highest-term
-  "Takes a test and a function of a client. Evaluates that function with a
+  "Takes a test and a function (f node client). Evaluates that function with a
   client bound to each node in parallel, and returns the response with the
   highest term."
   [test f]
-  (->> (:nodes test)
-       (real-pmap (fn [node]
-                    (try+
-                      (client/remap-errors
-                        (client/with-client [c node] (f c)))
-                      (catch client/client-error? e nil))))
-       (remove nil?)
-       (sort-by (comp :raft-term :header))
-       last))
+  (let [rs (->> (:nodes test)
+                (real-pmap (fn [node]
+                             (try+
+                               (client/remap-errors
+                                 (client/with-client [c node] (f node c)))
+                               (catch client/client-error? e nil))))
+                (remove nil?))]
+    (if (seq rs)
+      (last (sort-by (comp :raft-term :header) rs))
+      (throw+ {:type :no-node-responded}))))
 
 (defn primary
   "Picks the highest primary by term"
   [test]
-  (->> (real-pmap (fn [node]
-                    (try+ (primary+term test node)
-                          (catch [:type :timeout] _ nil)))
-                  (:nodes test))
-       (remove nil?)
-       (sort-by :term)
-       last
-       :primary))
+  (from-highest-term test
+                     (fn [node c]
+                       (->> (client/member-status c node)
+                            :leader
+                            (client/member-id->node c)))))
 
 (defn initial-cluster
   "Takes a set of nodes and constructs an initial cluster string, like
@@ -104,7 +87,7 @@
   "Takes a test, asks all nodes for their membership, and returns the highest
   membership based on term."
   [test]
-  (->> (from-highest-term test client/list-members)
+  (->> (from-highest-term test (fn [node client] (client/list-members client)))
        :members))
 
 (defn refresh-members!
@@ -140,8 +123,9 @@
       (info :adding new-node)
 
       ; Tell the cluster the new node is a part of it
-      (client/with-client [c (rand-nth (vec @(:members test)))]
-        (client/add-member! c new-node))
+      (client/remap-errors
+        (client/with-client [c (rand-nth (vec @(:members test)))]
+          (client/add-member! c new-node)))
 
       ; Update the test map to include the new node
       (swap! (:members test) conj new-node)
@@ -165,9 +149,10 @@
     (let [node (rand-nth (vec @(:members test)))]
       ; Ask cluster to remove it
       (let [contact (-> test :members deref (disj node) vec rand-nth)]
-        (client/with-client [c contact]
-          (info :removing node :via contact)
-          (client/remove-member! c node)))
+        (client/remap-errors
+          (client/with-client [c contact]
+            (info :removing node :via contact)
+            (client/remove-member! c node))))
 
       ; Kill the node and wipe its data dir; otherwise we'll break the cluster
       ; when it restarts

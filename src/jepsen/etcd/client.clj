@@ -22,7 +22,8 @@
                           Maintenance
                           Response
                           Response$Header)
-           (io.etcd.jetcd.common.exception ClosedClientException)
+           (io.etcd.jetcd.common.exception ClosedClientException
+                                           EtcdException)
            (io.etcd.jetcd.cluster Member
                                   MemberAddResponse
                                   MemberListResponse
@@ -231,6 +232,14 @@
                      (condp re-find (.getMessage e#)
                        e#))))))
 
+         (catch EtcdException e#
+           (throw+
+             (condp re-find (.getMessage e#)
+               #"io exception"
+               {:definite? false, :type :io-exception}
+
+               e#)))
+
          (catch java.net.ConnectException e#
            (throw+ {:definite?   true
                     :type        :connect-timeout
@@ -423,6 +432,23 @@
   "Lists all members of a cluster."
   [client]
   (-> client cluster-client .listMember await ->clj))
+
+(defn member-ids->nodes
+  "Looks up a map of member IDs to node names."
+  [client]
+  (->> (list-members client)
+       :members
+       (map (juxt :id :name))
+       (into {})))
+
+(defn member-id->node
+  "Looks up a node name by member ID."
+  [client member-id]
+  (let [nodes (member-ids->nodes client)]
+    (or (c/get nodes member-id)
+        (throw+ {:type      ::no-such-node
+                 :member-id member-id
+                 :members   nodes}))))
 
 (defn nodes->member-ids
   "Looks up a map of node IDS to member IDs."

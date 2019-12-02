@@ -45,8 +45,8 @@
         db            (db/db)
         nemesis       (nemesis/nemesis-package
                         {:db        db
-                         :faults    [:kill :member]
-                         ;:faults    [:partition :pause :kill]
+                         ;:faults    [:member]
+                         :faults    [:partition :pause :kill :member]
                          :partition {:targets [:primaries]}
                          :pause     {:targets [:primaries :all]}
                          :kill      {:targets [:primaries :all]}

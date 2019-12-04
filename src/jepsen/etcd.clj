@@ -12,7 +12,8 @@
             [jepsen.checker.timeline :as timeline]
             [jepsen.control.util :as cu]
             [jepsen.os.debian :as debian]
-            [jepsen.etcd [db :as db]
+            [jepsen.etcd [append :as append]
+                         [db :as db]
                          [client :as ec]
                          [lock :as lock]
                          [nemesis :as nemesis]
@@ -24,7 +25,8 @@
 
 (def workloads
   "A map of workload names to functions that construct workloads, given opts."
-  {"lock"           lock/workload
+  {"append"         append/workload
+   "lock"           lock/workload
    "lock-set"       lock/set-workload
    "lock-etcd-set"  lock/etcd-set-workload
    "set"            set/workload
@@ -45,8 +47,9 @@
         db            (db/db)
         nemesis       (nemesis/nemesis-package
                         {:db        db
-                         ;:faults    [:member]
-                         :faults    [:partition :pause :kill :member]
+                         ;:faults    []
+                         :faults    [:member :partition]
+                         ;:faults    [:partition :pause :kill :member]
                          :partition {:targets [:primaries :majority :majorities-ring]}
                          :pause     {:targets [:primaries :all]}
                          :kill      {:targets [:primaries :all]}

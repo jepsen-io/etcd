@@ -149,7 +149,6 @@
   [node]
   (.. (Client/builder)
       (endpoints (into-array String [(support/client-url node)]))
-      ;(endpoints (into-array String (map support/client-url ["n1" "n2" "n3" "n4" "n5"])))
       (lazyInitialization false)
       ; (loadBalancerPolicy "some string???")
       (build)))
@@ -218,6 +217,12 @@
                  Status$Code/NOT_FOUND
                  {:definite? true, :type :not-found, :description desc#}
 
+                 Status$Code/INVALID_ARGUMENT
+                 (condp re-find desc#
+                   #"duplicate key"
+                   {:definite? true, :type :duplicate-key, :description desc#}
+                   e#)
+
                  Status$Code/UNKNOWN
                  (condp re-find desc#
                    #"leader changed"
@@ -229,7 +234,7 @@
                  ; Fall back to regular expressions on status messages
                  (do (info "Unknown error status code" (.getCode status#)
                            "-" status# "-" e#)
-                     (condp re-find (.getMessage e#)
+                     (condp re-find desc#
                        e#))))))
 
          (catch EtcdException e#
@@ -330,14 +335,33 @@
   ([c test t-branch]
    (txn! c test t-branch nil))
   ([c test t f]
-   (-> (.. (kv-client c)
-           (txn)
-           (If   (into-array Cmp (coll test)))
-           (Then (into-array Op  (coll t)))
-           (Else (into-array Op  (coll f)))
-           (commit))
-       await
-       ->clj)))
+   (let [t (coll t)
+         f (coll f)
+         res (-> (.. (kv-client c)
+                     (txn)
+                     (If   (into-array Cmp (coll test)))
+                     (Then (into-array Op  t))
+                     (Else (into-array Op  f))
+                     (commit))
+                 await
+                 ->clj)
+         ; Zip together get/put responses into a single sequence
+         results (loop [rs   (transient [])
+                        ops  (seq (if (:succeeded? res) t f))
+                        gets (:gets res)
+                        puts (:puts res)]
+                   (if ops
+                     (condp instance? (first ops)
+                       Op$PutOp (recur (conj! rs (first puts))
+                                       (next ops)
+                                       gets
+                                       (next puts))
+                       Op$GetOp (recur (conj! rs (first gets))
+                                       (next ops)
+                                       (next gets)
+                                       puts))
+                     (persistent! rs)))]
+     (assoc res :results results))))
 
 (defn cas*!
   "Like cas!, but raw; returns full txn response map."

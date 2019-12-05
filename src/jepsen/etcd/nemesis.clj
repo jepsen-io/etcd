@@ -37,20 +37,21 @@
 (defn member-package
   "A combined nemesis package for adding and removing nodes."
   [opts]
-  {:nemesis   (member-nemesis opts)
-   :generator (member-generator opts)
-   :perf      #{{:name  "grow"
-                 :fs    [:grow]
-                 :color "#E9A0E6"}
-                {:name  "shrink"
-                 :fs    [:shrink]
-                 :color "#ACA0E9"}}})
+  (when ((:faults opts) :member)
+    {:nemesis   (member-nemesis opts)
+     :generator (member-generator opts)
+     :perf      #{{:name  "grow"
+                   :fs    [:grow]
+                   :color "#E9A0E6"}
+                  {:name  "shrink"
+                   :fs    [:shrink]
+                   :color "#ACA0E9"}}}))
 
 (defn nemesis-package
   "Constructs a nemesis and generators for etcd."
   [opts]
-  (let [faults (set (:faults opts))]
-    (nc/compose-packages
-      (cond-> []
-        (some faults [:kill :pause :partition]) (conj (nc/nemesis-package opts))
-        (some faults [:member])                 (conj (member-package opts))))))
+  (let [opts (update opts :faults set)]
+    (-> (nc/nemesis-packages opts)
+        (conj (member-package opts))
+        (->> (remove nil?))
+        nc/compose-packages)))

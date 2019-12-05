@@ -29,6 +29,7 @@
    "lock"           lock/workload
    "lock-set"       lock/set-workload
    "lock-etcd-set"  lock/etcd-set-workload
+   "none"           (fn [_] tests/noop-test)
    "set"            set/workload
    "register"       register/workload})
 
@@ -48,7 +49,7 @@
         nemesis       (nemesis/nemesis-package
                         {:db        db
                          ;:faults    []
-                         :faults    [:member :partition]
+                         :faults     [:clock]
                          ;:faults    [:partition :pause :kill :member]
                          :partition {:targets [:primaries :majority :majorities-ring]}
                          :pause     {:targets [:primaries :all]}

@@ -49,8 +49,8 @@
         nemesis       (nemesis/nemesis-package
                         {:db        db
                          ;:faults    []
-                         :faults     [:clock]
-                         ;:faults    [:partition :pause :kill :member]
+                         ;:faults     [:clock]
+                         :faults    [:partition :pause :kill :member :clock]
                          :partition {:targets [:primaries :majority :majorities-ring]}
                          :pause     {:targets [:primaries :all]}
                          :kill      {:targets [:primaries :all]}
@@ -66,6 +66,7 @@
             :nemesis    (:nemesis nemesis)
             :checker    (checker/compose
                           {:perf        (checker/perf {:nemeses (:perf nemesis)})
+                           :clock       (checker/clock-plot)
                            :stats       (checker/stats)
                            :exceptions  (checker/unhandled-exceptions)
                            :workload    (:checker workload)})

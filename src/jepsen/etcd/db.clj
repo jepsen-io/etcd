@@ -178,11 +178,12 @@
                :nodes                 @(:members test)}))
 
     (kill! [_ test node]
-      (cu/stop-daemon! binary pidfile))
+      (c/su
+        (cu/stop-daemon! binary pidfile)))
 
     db/Pause
-    (pause!  [_ test node] (cu/grepkill! :stop "etcd"))
-    (resume! [_ test node] (cu/grepkill! :cont "etcd"))
+    (pause!  [_ test node] (c/su (cu/grepkill! :stop "etcd")))
+    (resume! [_ test node] (c/su (cu/grepkill! :cont "etcd")))
 
     db/Primary
     (setup-primary! [_ test node])

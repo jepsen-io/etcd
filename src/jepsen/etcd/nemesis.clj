@@ -40,6 +40,10 @@
   (when ((:faults opts) :member)
     {:nemesis   (member-nemesis opts)
      :generator (member-generator opts)
+     :final-generator (gen/phases
+                        (gen/sleep 10)
+                        (->> {:type :info, :f :grow}
+                             (gen/limit (dec (count (:nodes opts))))))
      :perf      #{{:name  "grow"
                    :fs    [:grow]
                    :color "#E9A0E6"}
@@ -52,6 +56,6 @@
   [opts]
   (let [opts (update opts :faults set)]
     (-> (nc/nemesis-packages opts)
-        (conj (member-package opts))
+        (concat [(member-package opts)])
         (->> (remove nil?))
         nc/compose-packages)))

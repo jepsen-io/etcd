@@ -19,7 +19,8 @@
                          [nemesis :as nemesis]
                          [register :as register]
                          [set :as set]
-                         [support :as s]]
+                         [support :as s]
+                         [watch :as watch]]
             [knossos.model :as model]
             [slingshot.slingshot :refer [try+]]))
 
@@ -31,7 +32,8 @@
    "lock-etcd-set"  lock/etcd-set-workload
    "none"           (fn [_] tests/noop-test)
    "set"            set/workload
-   "register"       register/workload})
+   "register"       register/workload
+   "watch"          watch/workload})
 
 (defn etcd-test
   "Given an options map from the command line runner (e.g. :nodes, :ssh,
@@ -48,9 +50,11 @@
         db            (db/db)
         nemesis       (nemesis/nemesis-package
                         {:db        db
+                         :nodes     (:nodes opts)
                          ;:faults    []
                          ;:faults     [:clock]
-                         :faults    [:partition :pause :kill :member :clock]
+                         :faults    [:partition :pause :kill :member]
+                         ;:faults    [:partition :pause :kill :member :clock]
                          :partition {:targets [:primaries :majority :majorities-ring]}
                          :pause     {:targets [:primaries :all]}
                          :kill      {:targets [:primaries :all]}

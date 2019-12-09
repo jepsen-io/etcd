@@ -10,6 +10,7 @@
   (:import (java.lang AutoCloseable)
            (java.net URI)
            (java.nio.charset Charset)
+           (java.util.function Consumer)
            (io.etcd.jetcd ByteSequence
                           Client
                           ClientBuilder
@@ -21,7 +22,10 @@
                           Lock
                           Maintenance
                           Response
-                          Response$Header)
+                          Response$Header
+                          Watch
+                          Watch$Listener
+                          Watch$Watcher)
            (io.etcd.jetcd.common.exception ClosedClientException
                                            EtcdException)
            (io.etcd.jetcd.cluster Member
@@ -43,7 +47,13 @@
                              Op$PutOp
                              Op$GetOp)
            (io.etcd.jetcd.options GetOption
-                                  PutOption)
+                                  PutOption
+                                  WatchOption)
+           (io.etcd.jetcd.watch WatchEvent
+                                WatchEvent$EventType
+                                WatchResponse
+                                WatchResponseWithError
+                                WatchEvent$EventType)
            (io.grpc Status$Code
                     StatusRuntimeException)
            (io.grpc.stub StreamObserver)))
@@ -140,6 +150,21 @@
 
   UnlockResponse (->clj [r]
                    {:header (->clj (.getHeader r))})
+
+  WatchEvent (->clj [e]
+               {:type     (->clj (.getEventType e))
+                :kv       (->clj (.getKeyValue e))
+                :prev-kv  (->clj (.getPrevKV e))})
+
+  WatchEvent$EventType (->clj [e] (keyword (.toLowerCase (.name e))))
+
+  WatchResponse (->clj [r]
+                  {:header (->clj (.getHeader r))
+                   :events (map ->clj (.getEvents r))})
+
+  WatchResponseWithError (->clj [r]
+                           {:response  (->clj (.getWatchResponse r))
+                            :exception (.getException r)})
   )
 
 ; Opening and closing clients
@@ -533,3 +558,29 @@
   [client]
   (-> client cluster-client .listMember (.get))
   true)
+
+(defn ^Watch watch-client
+  "Gets a watch client from a client"
+  [^Client client]
+  (.getWatchClient client))
+
+(defn watch-consumer
+  "Builds a consumer for watches"
+  [f]
+  (reify Consumer
+    (accept [_ event]
+      (f (->clj event)))))
+
+(defn ^Watch$Watcher watch
+  "Watches key k, passing events to f. Use with-open or (.close) to close. If
+  revision is provided, watches since that revision."
+  ([client k revision f]
+   (info :watching (.. (WatchOption/newBuilder) (withRevision revision) build))
+   (.watch (watch-client client)
+           (->bytes k)
+           (.. (WatchOption/newBuilder) (withRevision revision) build)
+           (watch-consumer f)))
+  ([client k f]
+   (.watch (watch-client client)
+           (->bytes k)
+           (watch-consumer f))))

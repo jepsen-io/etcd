@@ -43,7 +43,9 @@
      :final-generator (gen/phases
                         (gen/sleep 10)
                         (->> {:type :info, :f :grow}
-                             (gen/limit (dec (count (:nodes opts))))))
+                             (repeat (dec (count (:nodes opts))))
+                             (interpose (gen/sleep 10))
+                             gen/seq))
      :perf      #{{:name  "grow"
                    :fs    [:grow]
                    :color "#E9A0E6"}

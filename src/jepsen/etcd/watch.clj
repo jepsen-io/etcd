@@ -47,25 +47,42 @@
         :watch (let [results (atom [])]
                  (with-open [w (watch! conn k results revision)]
                    (Thread/sleep (rand-int 5000)))
-                 (assoc op :type :ok, :value @results)))))
+                 (assoc op :type :ok, :value {:revision @revision
+                                              :log      @results})))))
 
   (teardown! [this test])
 
   (close! [this test]
     (c/close! conn)))
 
-(defn per-thread-logs
-  "Takes a test and a history, and computes a map of threads to the sequence of
-  values they observed."
+(defn per-thread-watches
+  "Takes a test and a history, and computes a map of threads to ok watch
+  operations."
   [test history]
   (let [concurrency (:concurrency test)]
     (->> history
          (filter op/ok?)
          (filter (comp #{:watch} :f))
-         (group-by (fn [op] (mod (:process op) concurrency)))
-         (map-vals (fn [ops]
-                     (->> ops
-                          (mapcat :value)))))))
+         (group-by (fn [op] (mod (:process op) concurrency))))))
+
+(defn per-thread-logs
+  "Takes a test and a history, and computes a map of threads to the sequence of
+  values they observed."
+  [test history]
+  (->> (per-thread-watches test history)
+       (map-vals (fn [ops]
+                   (->> ops
+                        (mapcat (comp :log :value)))))))
+
+(defn per-thread-revisions
+  "Takes a test and a history, and computes a map of threads to the highest
+  revision they observed."
+  [test history]
+  (->> (per-thread-watches test history)
+       (map-vals (fn [ops]
+                   (->> ops
+                        (map (comp :revision :value))
+                        (reduce max 0))))))
 
 (defn mode
   "Returns the most common x in coll, if one exists."
@@ -91,6 +108,7 @@
   (reify checker/Checker
     (check [_ test history opts]
       (let [logs (per-thread-logs test history)
+            revisions (per-thread-revisions test history)
             _         (info :logs logs)
             canonical (canonical-log (vals logs))
             deltas (->> logs
@@ -102,8 +120,11 @@
                                      :edit-distance ed
                                      :diff          diff}))))
                         (sort-by (comp - :edit-distance)))
-            valid? (not (seq deltas))]
-        (cond-> {:valid? valid?}
+            valid? (cond (not (apply = (vals revisions))) :unknown
+                         (seq deltas)                     false
+                         :else                            true)]
+        (cond-> {:valid? valid?
+                 :revisions revisions}
           (not valid?) (assoc :logs       logs
                               :canonical  canonical
                               :deltas     deltas))))))
@@ -118,6 +139,7 @@
                     watch {:type :invoke, :f :watch}]
                 (gen/reserve (count (:nodes opts)) write
                              watch))
-   :final-generator (gen/reserve (count (:nodes opts)) nil
+   :final-generator (gen/phases (gen/sleep 30)
+                                (gen/reserve (count (:nodes opts)) nil
                                  (gen/each
-                                   (gen/once {:type :invoke, :f :watch})))})
+                                   (gen/once {:type :invoke, :f :watch}))))})

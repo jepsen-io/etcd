@@ -52,8 +52,8 @@
                         {:db        db
                          :nodes     (:nodes opts)
                          ;:faults    []
-                         ;:faults     [:clock]
-                         :faults    [:partition :pause :kill :member]
+                         :faults     [:member]
+                         ;:faults    [:partition :pause :kill :member]
                          ;:faults    [:partition :pause :kill :member :clock]
                          :partition {:targets [:primaries :majority :majorities-ring]}
                          :pause     {:targets [:primaries :all]}

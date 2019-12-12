@@ -15,19 +15,56 @@
             [slingshot.slingshot :refer [try+]]))
 
 (defn watch!
-  "Watches key k, streaming updates into atom vector results, and updating
-  revision with each new event."
-  [conn k results revision]
-  ; Revision is inclusive, so we want to start just after we left off
-  ; Definitely don't pass 0, or you'll get wherever it is currently
-  (c/watch conn k (inc @revision)
-           (fn [event]
-             (->> (:events event)
-                  ; (map (juxt :type (comp :value val :kv))) ; [:put 2]
-                  (map (comp :value val :kv))
-                  (swap! results into))
-             (reset! revision (:revision (:header event)))
-             (info "observed up to" @revision))))
+  "Watches key k from revision on, returning a deref-able which, when
+  dereferenced, stops watching and returns results."
+  [conn process k revision]
+  ; State is a map of {:revision x, :log y}.
+  (let [state   (atom {:revision revision, :log []})
+        error   (promise)
+        results (promise)
+        ; Revision is inclusive, so we want to start just after we left off
+        ; Definitely don't pass 0, or you'll get wherever it is currently
+        w (c/watch conn k (inc revision)
+                   ; With every update, we append to the log and advance our
+                   ; revision in state.
+                   (fn update [event]
+                     (let [events (->> (:events event)
+                                       (map (comp :value val :kv)))
+                           rev' (:revision (:header event))]
+                       (swap! state (fn advance [{:keys [revision log]}]
+                                      ; this... should be true, right?
+                                      (assert (< revision rev')
+                                              (str "got event with revision "
+                                                   rev'
+                                                   " but we last saw "
+                                                   revision))
+                                      {:revision rev'
+                                       :log      (into log events)}))
+                       ;(info "process" process "observed up to" rev')
+                       ))
+
+                   ; Log errors and save them to return later.
+                   (fn errors [ex]
+                     ;(warn ex process "error during watch")
+                     (deliver error ex))
+
+                   ; Once the watch tells us we're all done, we package up our
+                   ; error, or state, and hand it off to the results promise.
+                   (fn complete []
+                     (if (realized? error)
+                       (do (info process "error watching from" revision "to"
+                                 (:revision @state))
+                           (deliver results @error))
+                       (do (info process "completed up to revision"
+                                 (:revision @state))
+                           (deliver results @state)))))]
+    ; When deref'ed, we kill the watch and wait for results, which are
+    ; delivered on completion.
+    (delay (.close w)
+           (let [r @results]
+             (if (instance? Throwable r)
+               (throw r)
+               r)))))
 
 (defrecord Client [conn k revision]
   client/Client
@@ -45,10 +82,12 @@
                    (assoc op :type :ok))
 
         :watch (let [results (atom [])]
-                 (with-open [w (watch! conn k results revision)]
-                   (Thread/sleep (rand-int 5000)))
-                 (assoc op :type :ok, :value {:revision @revision
-                                              :log      @results})))))
+                 (let [w (watch! conn (:process op) k @revision)
+                       _ (Thread/sleep (rand-int 5000))
+                       res @w]
+                   ; Advance our revision counter for the next watch
+                   (reset! revision (:revision res))
+                   (assoc op :type :ok, :value res))))))
 
   (teardown! [this test])
 
@@ -142,4 +181,4 @@
    :final-generator (gen/phases (gen/sleep 30)
                                 (gen/reserve (count (:nodes opts)) nil
                                  (gen/each
-                                   (gen/once {:type :invoke, :f :watch}))))})
+                                   (gen/limit 2 {:type :invoke, :f :watch}))))})

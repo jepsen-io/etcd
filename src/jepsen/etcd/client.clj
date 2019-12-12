@@ -253,6 +253,9 @@
                    #"leader changed"
                    {:definite? false, :type :leader-changed}
 
+                   #"raft: stopped"
+                   {:definite? true, :type :raft-stopped}
+
                    (do (info "Unknown code=UNKNOWN description" (pr-str desc#))
                        e#))
 
@@ -265,6 +268,10 @@
          (catch EtcdException e#
            (throw+
              (condp re-find (.getMessage e#)
+               ; what even is this???
+               #"Network closed for unknown reason"
+               {:definite? false, :type :network-closed-unknown-reason}
+
                #"io exception"
                {:definite? false, :type :io-exception}
 
@@ -574,13 +581,19 @@
 (defn ^Watch$Watcher watch
   "Watches key k, passing events to f. Use with-open or (.close) to close. If
   revision is provided, watches since that revision."
+  ([client k f]
+   (.watch (watch-client client)
+           (->bytes k)
+           (watch-consumer f)))
   ([client k revision f]
-   (info :watching (.. (WatchOption/newBuilder) (withRevision revision) build))
    (.watch (watch-client client)
            (->bytes k)
            (.. (WatchOption/newBuilder) (withRevision revision) build)
            (watch-consumer f)))
-  ([client k f]
+  ([client k revision f err-f complete-f]
    (.watch (watch-client client)
            (->bytes k)
-           (watch-consumer f))))
+           (.. (WatchOption/newBuilder) (withRevision revision) build)
+           (watch-consumer f)
+           (reify Consumer (accept [_ e] (err-f e)))
+           complete-f)))

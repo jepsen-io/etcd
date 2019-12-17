@@ -288,6 +288,15 @@
                #"Connection reset by peer"
                {:definite? false, :type :connection-reset}
 
+               e#)))
+
+         (catch java.lang.IllegalStateException e#
+           (throw+
+             (condp re-find (.getMessage e#)
+               ; Pretty sure this one's a bug in jetcd
+               #"Stream is already completed"
+               {:definite? false, :type :stream-already-completed}
+
                e#)))))
 
 (defn client-error?

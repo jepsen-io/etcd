@@ -219,4 +219,8 @@
 
     db/LogFiles
     (log-files [_ test node]
-      [logfile])))
+      ; hack hack hack
+      (meh (c/su (c/cd dir
+                       (c/exec :tar :cjf "data.tar.bz2" (str node ".etcd")))))
+      [logfile
+       (str dir "/data.tar.bz2")])))

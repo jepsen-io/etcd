@@ -12,14 +12,16 @@
                     [util :as util :refer [map-vals]]]
             [jepsen.checker.timeline :as timeline]
             [jepsen.etcd [client :as c]]
-            [slingshot.slingshot :refer [try+]]))
+            [slingshot.slingshot :refer [throw+ try+]]))
 
-(defn watch!
+(defn watch
   "Watches key k from revision on, returning a deref-able which, when
   dereferenced, stops watching and returns results."
   [conn process k revision]
   ; State is a map of {:revision x, :log y}.
-  (let [state   (atom {:revision revision, :log []})
+  (let [state   (atom {:revision revision
+                       :events   []
+                       :log      []})
         error   (promise)
         results (promise)
         ; Revision is inclusive, so we want to start just after we left off
@@ -28,17 +30,31 @@
                    ; With every update, we append to the log and advance our
                    ; revision in state.
                    (fn update [event]
+                     ;(info "process" process "got" (pr-str event))
                      (let [events (->> (:events event)
                                        (map (comp :value val :kv)))
-                           rev' (:revision (:header event))]
-                       (swap! state (fn advance [{:keys [revision log]}]
-                                      ; this... should be true, right?
-                                      (assert (< revision rev')
-                                              (str "got event with revision "
-                                                   rev'
-                                                   " but we last saw "
-                                                   revision))
+                           rev' (->> (:events event)
+                                     (map (comp :mod-revision val :kv))
+                                     (reduce max))]
+                       (swap! state (fn advance [{:keys [revision log] :as s}]
+                                      ; This should never happen, but when we
+                                      ; used the response header's revision
+                                      ; instead of taking the max of
+                                      ; mod-revisions, it sometimes did!
+                                      (when-not (< revision rev')
+                                        (throw+ {:type      :nonmonotonic-watch
+                                                 :definite? true
+                                                 :description
+                                                 (str "got event with revision "
+                                                      rev'
+                                                      " but we last saw "
+                                                      revision ":\n"
+                                                      (pr-str event))
+                                                 :revision revision
+                                                 :revision' rev'
+                                                 :event     event}))
                                       {:revision rev'
+                                       :events   (conj (:events s) event)
                                        :log      (into log events)}))
                        ;(info "process" process "observed up to" rev')
                        ))
@@ -66,7 +82,14 @@
                (throw r)
                r)))))
 
-(defrecord Client [conn k revision]
+(defn watch-for
+  "Watches key `k` from `revision` for `ms` milliseconds."
+  [conn process k revision ms]
+  (let [w (watch conn process k revision)]
+    (Thread/sleep ms)
+    @w))
+
+(defrecord Client [conn k max-revision revision]
   client/Client
   (open! [this test node]
     (assoc this
@@ -76,18 +99,51 @@
   (setup! [this test])
 
   (invoke! [_ test op]
-    (c/with-errors op #{:watch}
+    ; It's important that watch and final watch always return definite errors.
+    ; If they don't, we'd spin up a fresh client with a new revision, and see
+    ; duplicate elements in the log for that thread.
+    (c/with-errors op #{:watch :final-watch}
       (case (:f op)
-        :write (do (c/put! conn k (:value op))
-                   (assoc op :type :ok))
+        :write (let [res (c/put! conn k (:value op))]
+                 (->> res :header
+                      :revision
+                      (swap! max-revision max))
+                 (assoc op :type :ok))
 
-        :watch (let [results (atom [])]
-                 (let [w (watch! conn (:process op) k @revision)
-                       _ (Thread/sleep (rand-int 5000))
-                       res @w]
-                   ; Advance our revision counter for the next watch
-                   (reset! revision (:revision res))
-                   (assoc op :type :ok, :value res))))))
+        :watch
+        (let [res (watch-for conn (:process op) k @revision (rand-int 5000))]
+          ; Advance our revision counter for the next watch
+          (reset! revision (:revision res))
+          ; And the global revision counter
+          (swap! max-revision max (:revision res))
+          (assoc op :type :ok, :value res))
+
+        :final-watch
+        (loop [rev @revision
+               log []]
+          (if (<= @max-revision rev)
+            ; We're caught up
+            (assoc op :type :ok, :value {:revision rev, :log log})
+
+            ; More to go!
+            (let [[rev log]
+                  (try+ (c/remap-errors
+                          (let [_ (info "at rev" rev " catching up to "
+                                        @max-revision)
+                                w (watch-for conn (:process op) k rev
+                                             (rand-int 5000))]
+                            ; We don't need to advance this state any more if
+                            ; we're only called once, but it feels polite to
+                            ; do so.
+                            (reset! revision (:revision w))
+                            ; We don't update the global revision counter--I
+                            ; think we'd race if it changed
+                            [(:revision w) (into log (:log w))]))
+                        (catch c/client-error? e
+                          (warn e "caught during final-watch; retrying")
+                          (Thread/sleep 1000)
+                          [rev log]))]
+              (recur rev log)))))))
 
   (teardown! [this test])
 
@@ -101,7 +157,7 @@
   (let [concurrency (:concurrency test)]
     (->> history
          (filter op/ok?)
-         (filter (comp #{:watch} :f))
+         (filter (comp #{:watch :final-watch} :f))
          (group-by (fn [op] (mod (:process op) concurrency))))))
 
 (defn per-thread-logs
@@ -140,6 +196,14 @@
   [logs]
   (or (mode logs) (longest logs)))
 
+(defn nonmonotonic-errors
+  "Takes a history and extracts any nonmonotonic error messages."
+  [history]
+  (->> history
+       (keep :error)
+       (filter (comp #{:nonmonotonic-watch} first))
+       (map second)))
+
 (defn checker
   "We reconstruct the order of values as seen by each individual process, then
   compare them for equality."
@@ -159,18 +223,21 @@
                                      :edit-distance ed
                                      :diff          diff}))))
                         (sort-by (comp - :edit-distance)))
-            valid? (cond (not (apply = (vals revisions))) :unknown
+            nm-errors (nonmonotonic-errors history)
+            valid? (cond (seq nm-errors)                  false
+                         (not (apply = (vals revisions))) :unknown
                          (seq deltas)                     false
                          :else                            true)]
-        (cond-> {:valid? valid?
+        (cond-> {:valid?    valid?
                  :revisions revisions}
           (not valid?) (assoc :logs       logs
                               :canonical  canonical
-                              :deltas     deltas))))))
+                              :deltas     deltas
+                              :nonmonotonic-errors nm-errors))))))
 
 (defn workload
   [opts]
-  {:client    (Client. nil "w" nil)
+  {:client    (Client. nil "w" (atom 0) nil)
    :checker   (checker)
    :generator (let [write (->> (range)
                                (map (fn [x] {:type :invoke, :f :write, :value x}))
@@ -178,7 +245,7 @@
                     watch {:type :invoke, :f :watch}]
                 (gen/reserve (count (:nodes opts)) write
                              watch))
-   :final-generator (gen/phases (gen/sleep 30)
-                                (gen/reserve (count (:nodes opts)) nil
+   :final-generator (gen/phases (gen/reserve (count (:nodes opts)) nil
                                  (gen/each
-                                   (gen/limit 2 {:type :invoke, :f :watch}))))})
+                                   (gen/once {:type :invoke
+                                              :f    :final-watch}))))})

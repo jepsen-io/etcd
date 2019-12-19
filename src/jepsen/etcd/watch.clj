@@ -9,10 +9,112 @@
             [jepsen [checker :as checker]
                     [client :as client]
                     [generator :as gen]
-                    [util :as util :refer [map-vals]]]
+                    [util :as util :refer [meh map-vals]]]
             [jepsen.checker.timeline :as timeline]
             [jepsen.etcd [client :as c]]
-            [slingshot.slingshot :refer [throw+ try+]]))
+            [slingshot.slingshot :refer [throw+ try+]])
+  (:import (java.util.concurrent.locks LockSupport)))
+
+(defn converger
+  "Generates a convergence context for n threads, where values are converged
+  when (converged? values) returns true."
+  [n converged?]
+  (atom {; The convergence function
+         :converged? converged?
+         ; What threads are involved?
+         :threads []
+         ; And what values did they most recently come to?
+         :values (vec (repeat n ::init))}))
+
+(defn await-converger-change
+  "Wait for a converger's state to change. Might return for no reason."
+  [c]
+  (LockSupport/park c))
+
+(defn signal-converger-change!
+  "Let a converger know that its state has changed."
+  [c]
+  (doseq [t (:threads @c)]
+    (LockSupport/unpark t)))
+
+(defn stable?
+  "A converger state is stable when no value is initial or evolving."
+  [c]
+  (not-any? #{::init ::evolving} (:values c)))
+
+(defn divergent?
+  "A converger state is divergent when any values are initial, or some
+  non-evolving values don't pass the convergence test."
+  [c]
+  (or (some #{::init} (:values c))
+      (let [vs (remove #{::evolving} (:values c))]
+        (and (seq vs)
+             (not ((:converged? c) vs))))))
+
+(defn converged?
+  "A converger state is converged when it is stable and non-divergent."
+  [c]
+  (and (stable? c)
+       (not (divergent? c))))
+
+(defn evolve!
+  "Takes a converger, an evolve function, an initial value, and a thread index
+  i. Takes the previous value for this thread (or the initial value), clears it
+  from the converger, and calls (evolve value) to generate value', finally
+  updating the converger with value'."
+  [converger evolve init i]
+  (let [value (atom nil)]
+    ; Get the current value and clear it from the converger
+    (swap! converger (fn [c]
+                       (let [v (nth (:values c) i)
+                             v (if (= ::init v) init v)]
+                         (reset! value v))
+                       (assoc-in c [:values i] ::evolving)))
+
+    ; Evolve
+    (let [value' (evolve @value)]
+      (swap! converger #(assoc-in % [:values i] value'))
+      ;(info @value '-> value'))
+      )
+
+    ; Let other threads know the values have changed
+    (signal-converger-change! converger)
+    nil))
+
+(defn converge!
+  "Takes a converger, an initial value, and a function which evolves values
+  over time.
+
+  When `converge` is called, evaluates `evolve` repeatedly, starting with the
+  initial value; each successive invocation receives the result of the previous
+  invocation. Returns a value only when (converged? [v1 v2 ...]) returns
+  truthy.
+
+  Always invokes evolve at least once; the initial state doesn't count as
+  converged.
+
+  If evolve throws, horrible things will happen. Probably deadlock or livelock.
+  I should fix this later."
+  [converger init evolve]
+  ; Acquire our unique thread index
+  (let [i (-> (swap! converger update :threads conj (Thread/currentThread))
+              :threads
+              count
+              dec)]
+    (loop []
+      (cond ; If we're converged, return our value
+            (converged? @converger)
+            (-> converger deref :values (get i))
+
+            ; If we're divergent, evolve
+            (divergent? @converger)
+            (do (evolve! converger evolve init i)
+                (recur))
+
+            ; Otherwise, wait for something to change
+            true
+            (do (await-converger-change converger)
+                (recur))))))
 
 (defn watch
   "Watches key k from revision on, returning a deref-able which, when
@@ -76,7 +178,7 @@
                            (deliver results @state)))))]
     ; When deref'ed, we kill the watch and wait for results, which are
     ; delivered on completion.
-    (delay (.close w)
+    (delay (meh (.close w)) ; this can throw??? why!?
            (let [r @results]
              (if (instance? Throwable r)
                (throw r)
@@ -89,7 +191,7 @@
     (Thread/sleep ms)
     @w))
 
-(defrecord Client [conn k max-revision revision]
+(defrecord Client [conn k max-revision revision converger]
   client/Client
   (open! [this test node]
     (assoc this
@@ -119,31 +221,26 @@
           (assoc op :type :ok, :value res))
 
         :final-watch
-        (loop [rev @revision
-               log []]
-          (if (<= @max-revision rev)
-            ; We're caught up
-            (assoc op :type :ok, :value {:revision rev, :log log})
-
-            ; More to go!
-            (let [[rev log]
-                  (try+ (c/remap-errors
-                          (let [_ (info "at rev" rev " catching up to "
-                                        @max-revision)
-                                w (watch-for conn (:process op) k rev
-                                             (rand-int 5000))]
-                            ; We don't need to advance this state any more if
-                            ; we're only called once, but it feels polite to
-                            ; do so.
-                            (reset! revision (:revision w))
-                            ; We don't update the global revision counter--I
-                            ; think we'd race if it changed
-                            [(:revision w) (into log (:log w))]))
-                        (catch c/client-error? e
-                          (warn e "caught during final-watch; retrying")
-                          (Thread/sleep 1000)
-                          [rev log]))]
-              (recur rev log)))))))
+        (let [v (converge!
+                  converger
+                  {:revision @revision, :log []}
+                  (fn [v]
+                    (let [rev (:revision v)
+                          log (:log v)]
+                      (try+ (c/remap-errors
+                              (let [_ (info "at rev" rev " catching up to "
+                                            @max-revision)
+                                    w (watch-for conn (:process op) k rev
+                                                 (rand-int 5000))]
+                                ; Advance our revisions
+                                (reset! revision (:revision w))
+                                (swap! max-revision max (:revision w))
+                                (assoc w :log (into (:log v) (:log w)))))
+                            (catch c/client-error? e
+                              (warn e "caught during final-watch; retrying")
+                              (Thread/sleep 1000)
+                              v)))))]
+          (assoc op :type :ok, :value v)))))
 
   (teardown! [this test])
 
@@ -237,7 +334,9 @@
 
 (defn workload
   [opts]
-  {:client    (Client. nil "w" (atom 0) nil)
+  {:client    (Client. nil "w" (atom 0) nil
+                       (converger (count (:nodes opts))
+                                  (fn [ms] (apply = (map :revision ms)))))
    :checker   (checker)
    :generator (let [write (->> (range)
                                (map (fn [x] {:type :invoke, :f :write, :value x}))

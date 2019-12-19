@@ -293,6 +293,10 @@
          (catch java.lang.IllegalStateException e#
            (throw+
              (condp re-find (.getMessage e#)
+               ; Oooh, this one's rare
+               #"call already half-closed"
+               {:definite? false, :type :call-already-half-closed}
+
                ; Pretty sure this one's a bug in jetcd
                #"Stream is already completed"
                {:definite? false, :type :stream-already-completed}
@@ -572,8 +576,13 @@
 (defn await-node-ready
   "Blocks until this node is responding to queries."
   [client]
-  (-> client cluster-client .listMember (.get))
-  true)
+  (or (try+ (remap-errors (-> client cluster-client .listMember (.get))
+                          true)
+            (catch client-error? e
+              (warn e "Caught waiting for node to become ready")
+              (Thread/sleep 1000)
+              false))
+      (recur client)))
 
 (defn ^Watch watch-client
   "Gets a watch client from a client"

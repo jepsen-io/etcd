@@ -51,10 +51,7 @@
         nemesis       (nemesis/nemesis-package
                         {:db        db
                          :nodes     (:nodes opts)
-                         ;:faults    []
-                         ;:faults     [:member]
-                         :faults    [:partition :pause :kill :member]
-                         ;:faults    [:partition :pause :kill :member :clock]
+                         :faults    (:nemesis opts)
                          :partition {:targets [:primaries :majority :majorities-ring]}
                          :pause     {:targets [:primaries :all]}
                          :kill      {:targets [:primaries :all]}
@@ -86,6 +83,19 @@
                          (gen/sleep 10)
                          (gen/clients (:final-generator workload)))})))
 
+(def special-nemeses
+  "A map of special nemesis names to collections of faults"
+  {:none []
+   :all  [:pause :kill :partition :clock :member]})
+
+(defn parse-nemesis-spec
+  "Takes a comma-separated nemesis string and returns a collection of keyword
+  faults."
+  [spec]
+  (->> (str/split spec #",")
+       (map keyword)
+       (mapcat #(get special-nemeses % [%]))))
+
 (def cli-opts
   "Additional command line options."
   [["-v" "--version STRING" "What version of etcd should we install?"
@@ -101,7 +111,12 @@
    [nil "--ops-per-key NUM" "Maximum number of operations on any given key."
     :default  200
     :parse-fn parse-long
-    :validate [pos? "Must be a positive integer."]]])
+    :validate [pos? "Must be a positive integer."]]
+   [nil "--nemesis FAULTS" "A comma-separated list of nemesis faults to enable"
+    :default  []
+    :parse-fn parse-nemesis-spec
+    :validate [(partial every? #{:pause :kill :partition :clock :member})
+               "Faults must be pause, kill, partition, clock, or member, or the special faults all or none."]]])
 
 (defn -main
   "Handles command line arguments. Can either run a test, or a web server for

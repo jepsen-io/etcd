@@ -240,7 +240,7 @@
                     (let [rev (:revision v)
                           log (:log v)]
                       (try+ (c/remap-errors
-                              (let [_ (info "at rev" rev " catching up to "
+                              (let [_ (info "at rev" rev "catching up to"
                                             @max-revision)
                                     w (watch-for conn (:process op) k rev
                                                  (rand-int 5000))]

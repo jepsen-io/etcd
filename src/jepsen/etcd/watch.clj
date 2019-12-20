@@ -13,7 +13,8 @@
             [jepsen.checker.timeline :as timeline]
             [jepsen.etcd [client :as c]]
             [slingshot.slingshot :refer [throw+ try+]])
-  (:import (java.util.concurrent.locks LockSupport)))
+  (:import (java.util.concurrent BrokenBarrierException)
+           (java.util.concurrent.locks LockSupport)))
 
 (defn converger
   "Generates a convergence context for n threads, where values are converged
@@ -72,14 +73,18 @@
                        (assoc-in c [:values i] ::evolving)))
 
     ; Evolve
-    (let [value' (evolve @value)]
-      (swap! converger #(assoc-in % [:values i] value'))
-      ;(info @value '-> value'))
-      )
-
-    ; Let other threads know the values have changed
-    (signal-converger-change! converger)
-    nil))
+    (try
+      (let [value' (evolve @value)]
+        (swap! converger #(assoc-in % [:values i] value')))
+      (catch Throwable t
+        ; If we throw here, all bets are off. We can't safely return, since we
+        ; haven't converged. We set :crashed? to true in the converger, and let
+        ; all threads wake up.
+        (swap! converger assoc :crashed? true))
+      (finally
+        ; Let other threads know we've done some work and they can wake up
+        (signal-converger-change! converger)))
+      nil))
 
 (defn converge!
   "Takes a converger, an initial value, and a function which evolves values
@@ -102,19 +107,26 @@
               count
               dec)]
     (loop []
-      (cond ; If we're converged, return our value
-            (converged? @converger)
-            (-> converger deref :values (get i))
+      (let [c @converger]
+        (cond ; If we've crashed, throw a BrokenBarrierException. We're not
+              ; really using a cyclic barrier, but this is *basically* a
+              ; concurrency barrier, and it *is* broken.
+              (:crashed? c)
+              (throw (BrokenBarrierException. "Convergence failed"))
 
-            ; If we're divergent, evolve
-            (divergent? @converger)
-            (do (evolve! converger evolve init i)
-                (recur))
+              ; If we're converged, return our value
+              (converged? c)
+              (-> converger deref :values (get i))
 
-            ; Otherwise, wait for something to change
-            true
-            (do (await-converger-change converger)
-                (recur))))))
+              ; If we're divergent, evolve
+              (divergent? c)
+              (do (evolve! converger evolve init i)
+                  (recur))
+
+              ; Otherwise, wait for something to change
+              true
+              (do (await-converger-change converger)
+                  (recur)))))))
 
 (defn watch
   "Watches key k from revision on, returning a deref-able which, when

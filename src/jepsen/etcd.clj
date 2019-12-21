@@ -37,6 +37,14 @@
    :register       register/workload
    :watch          watch/workload})
 
+(def all-workloads
+  "A collection of workloads we run by default."
+  (remove #{:none} (keys workloads)))
+
+(def workloads-expected-to-pass
+  "A collection of workload names which we expect should actually pass."
+  (remove #{:lock :lock-set} all-workloads))
+
 (def all-nemeses
   "Combinations of nemeses for tests"
   [[]
@@ -122,6 +130,8 @@
     :default  200
     :parse-fn parse-long
     :validate [pos? "Must be a positive integer."]]
+   [nil "--only-workloads-expected-to-pass" "Don't run tests which we know fail."
+    :default false]
    [nil "--nemesis FAULTS" "A comma-separated list of nemesis faults to enable"
     :parse-fn parse-nemesis-spec
     :validate [(partial every? #{:pause :kill :partition :clock :member})
@@ -140,7 +150,10 @@
   "Turns CLI options into a sequence of tests."
   [test-fn cli]
   (let [nemeses   (if-let [n (:nemesis cli)] [n]  all-nemeses)
-        workloads (if-let [w (:workload cli)] [w] (keys workloads))]
+        workloads (if-let [w (:workload cli)] [w]
+                    (if (:only-workloads-expected-to-pass cli)
+                      workloads-expected-to-pass
+                      (keys workloads)))]
     (->> (all-test-options cli nemeses workloads)
          (map test-fn))))
 

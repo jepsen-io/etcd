@@ -1,14 +1,27 @@
 # jepsen.etcd
 
-A Clojure library designed to ... well, that part is up to you.
+Jepsen tests for the etcd consensus system! To run these, you'll need a [Jepsen
+cluster](https://github.com/jepsen-io/jepsen). Then, in the standard tests,
+run:
 
 ## Usage
 
-FIXME
+To run a full test suite, run
+
+```sh
+lein run test-all --concurrency 2n
+```
+
+You can focus in on particular combinations of faults, or particular workloads:
+
+```sh
+lein run test-all --concurrency 2n --workload lock
+lein run test-all --concurrency 2n --nemesis kill,partition
+```
 
 ## License
 
-Copyright © 2019 FIXME
+Copyright © 2019 Jepsen, LLC
 
 This program and the accompanying materials are made available under the
 terms of the Eclipse Public License 2.0 which is available at

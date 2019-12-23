@@ -9,8 +9,9 @@
                     [control :as c]
                     [generator :as gen]
                     [independent :as independent]
+                    [store :as store]
                     [tests :as tests]
-                    [util :as util :refer [parse-long]]]
+                    [util :as util :refer [parse-long map-vals]]]
             [jepsen.checker.timeline :as timeline]
             [jepsen.control.util :as cu]
             [jepsen.os.debian :as debian]
@@ -153,9 +154,66 @@
         workloads (if-let [w (:workload cli)] [w]
                     (if (:only-workloads-expected-to-pass cli)
                       workloads-expected-to-pass
-                      (keys workloads)))]
+                      all-workloads))]
     (->> (all-test-options cli nemeses workloads)
          (map test-fn))))
+
+(defn run-tests!
+  "Runs a sequence of tests and returns a map of outcomes (e.g. true, :unknown,
+  :crashed, false) to collections of test folders with that outcome."
+  [tests]
+  (->> tests
+       (map-indexed
+         (fn [i test]
+           (try
+             (let [test' (jepsen/run! test)]
+               [(:valid? (:results test'))
+                (.getPath (store/path test'))])
+             (catch Exception e
+               (warn e "Test crashed")
+               [:crashed (:name test)]))))
+       (group-by first)
+       (map-vals (partial map second))))
+
+(defn print-summary!
+  "Prints a summary of test outcomes. Takes a map of statuses (e.g. :crashed,
+  true, false, :unknown), to test files. Returns results."
+  [results]
+  (println "\n")
+
+  (when (seq (results true))
+    (println "\n# Successful tests\n")
+    (dorun (map println (results true))))
+
+  (when (seq (results :unknown))
+    (println "\n# Indeterminate tests\n")
+    (dorun (map println (results :unknown))))
+
+  (when (seq (results :crashed))
+    (println "\n# Crashed tests\n")
+    (dorun (map println (results :crashed))))
+
+  (when (seq (results false))
+    (println "\n# Failed tests\n")
+    (dorun (map println (results false))))
+
+  (println)
+  (println (count (results true)) "successes")
+  (println (count (results :unknown)) "unknown")
+  (println (count (results :crashed)) "crashed")
+  (println (count (results false)) "failures")
+
+  results)
+
+(defn exit!
+  "Takes a map of statuses and exits with an appropriate error code: 3 if any
+  crashed, 2 if any were invaliud, 1 if any were unknown, 0 if all passed."
+  [results]
+  (System/exit (cond
+                 (:crashed results)   3
+                 (:unknown results)   2
+                 (get results false)  1
+                 true                 0)))
 
 (defn test-all-cmd
   "A command that runs a whole suite of tests in one go."
@@ -168,13 +226,9 @@
                 (info "CLI options:\n" (with-out-str (pprint options)))
                 (->> options
                      (all-tests test-fn)
-                     (map-indexed
-                       (fn [i test]
-                         (try
-                           (jepsen/run! test)
-                           (catch Exception e
-                             (warn e "Test crashed")))))
-                     dorun))}})
+                     run-tests!
+                     print-summary!
+                     exit!))}})
 
 (defn -main
   "Handles command line arguments. Can either run a test, or a web server for

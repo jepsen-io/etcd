@@ -158,85 +158,13 @@
     (->> (all-test-options cli nemeses workloads)
          (map test-fn))))
 
-(defn run-tests!
-  "Runs a sequence of tests and returns a map of outcomes (e.g. true, :unknown,
-  :crashed, false) to collections of test folders with that outcome."
-  [tests]
-  (->> tests
-       (map-indexed
-         (fn [i test]
-           (try
-             (let [test' (jepsen/run! test)]
-               [(:valid? (:results test'))
-                (.getPath (store/path test'))])
-             (catch Exception e
-               (warn e "Test crashed")
-               [:crashed (:name test)]))))
-       (group-by first)
-       (map-vals (partial map second))))
-
-(defn print-summary!
-  "Prints a summary of test outcomes. Takes a map of statuses (e.g. :crashed,
-  true, false, :unknown), to test files. Returns results."
-  [results]
-  (println "\n")
-
-  (when (seq (results true))
-    (println "\n# Successful tests\n")
-    (dorun (map println (results true))))
-
-  (when (seq (results :unknown))
-    (println "\n# Indeterminate tests\n")
-    (dorun (map println (results :unknown))))
-
-  (when (seq (results :crashed))
-    (println "\n# Crashed tests\n")
-    (dorun (map println (results :crashed))))
-
-  (when (seq (results false))
-    (println "\n# Failed tests\n")
-    (dorun (map println (results false))))
-
-  (println)
-  (println (count (results true)) "successes")
-  (println (count (results :unknown)) "unknown")
-  (println (count (results :crashed)) "crashed")
-  (println (count (results false)) "failures")
-
-  results)
-
-(defn exit!
-  "Takes a map of statuses and exits with an appropriate error code: 3 if any
-  crashed, 2 if any were invaliud, 1 if any were unknown, 0 if all passed."
-  [results]
-  (System/exit (cond
-                 (:crashed results)   3
-                 (:unknown results)   2
-                 (get results false)  1
-                 true                 0)))
-
-(defn test-all-cmd
-  "A command that runs a whole suite of tests in one go."
-  [{:keys [test-fn] :as opts}]
-  {"test-all"
-   {:opt-spec (concat cli/test-opt-spec cli-opts)
-    :opt-fn   cli/test-opt-fn
-    :usage    "Runs all tests"
-    :run      (fn run [{:keys [options]}]
-                (info "CLI options:\n" (with-out-str (pprint options)))
-                (->> options
-                     (all-tests test-fn)
-                     run-tests!
-                     print-summary!
-                     exit!))}})
-
 (defn -main
   "Handles command line arguments. Can either run a test, or a web server for
   browsing results."
   [& args]
   (cli/run! (merge (cli/single-test-cmd {:test-fn  etcd-test
                                          :opt-spec cli-opts})
-                   (test-all-cmd {:test-fn  etcd-test
-                                  :opt-spec cli-opts})
+                   (cli/test-all-cmd {:tests-fn (partial all-tests etcd-test)
+                                      :opt-spec cli-opts})
                    (cli/serve-cmd))
             args))

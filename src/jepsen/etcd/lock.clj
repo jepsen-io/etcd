@@ -247,9 +247,8 @@
   "Tests mutating an in-memory set."
   [opts]
   (let [adds (->> (range)
-                  (map (fn [x] {:type :invoke, :f :add, :value x}))
-                  gen/seq)
-        reads {:type :invoke, :f :read}]
+                  (map (fn [x] {:type :invoke, :f :add, :value x})))
+        reads (repeat {:type :invoke, :f :read})]
     {:client    (map->LockingSetClient {:lock-name    "foo"
                                         :latency      1000
                                         :set          (atom [])})

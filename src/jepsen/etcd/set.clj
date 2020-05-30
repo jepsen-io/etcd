@@ -33,8 +33,7 @@
 (defn w
   []
   (->> (range)
-       (map (fn [x] {:type :invoke, :f :add, :value x}))
-       gen/seq))
+       (map (fn [x] {:type :invoke, :f :add, :value x}))))
 
 (defn r
   []
@@ -45,4 +44,4 @@
   [opts]
   {:client    (SetClient. "a-set" nil)
    :checker   (checker/set-full {:linearizable? true})
-   :generator (gen/reserve 5 (r) (w))})
+   :generator (gen/reserve 5 (repeat (r)) (w))})

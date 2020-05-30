@@ -351,12 +351,11 @@
                                   (fn [ms] (apply = (map :revision ms)))))
    :checker   (checker)
    :generator (let [write (->> (range)
-                               (map (fn [x] {:type :invoke, :f :write, :value x}))
-                               gen/seq)
-                    watch {:type :invoke, :f :watch}]
+                               (map (fn [x] {:type :invoke, :f :write, :value x})))
+                    watch (repeat {:type :invoke, :f :watch})]
                 (gen/reserve (count (:nodes opts)) write
                              watch))
    :final-generator (gen/phases (gen/reserve (count (:nodes opts)) nil
-                                 (gen/each
-                                   (gen/once {:type :invoke
-                                              :f    :final-watch}))))})
+                                 (gen/each-thread
+                                   {:type :invoke
+                                    :f    :final-watch})))})

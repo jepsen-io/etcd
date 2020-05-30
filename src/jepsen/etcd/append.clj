@@ -128,6 +128,5 @@
   [opts]
   (assoc (append/test {:key-count         3
                        :max-txn-length    4
-                       :anomalies         [:G0 :G1 :G2]
-                       :additional-graphs [cycle/realtime-graph]})
+                       :consistency-models [:strict-serializable]})
          :client (TxnClient. nil)))

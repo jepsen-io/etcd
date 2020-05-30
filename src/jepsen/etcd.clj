@@ -91,6 +91,7 @@
            {:name       (str "etcd " (name workload-name)
                              " " (str/join "," (map name (:nemesis opts)))
                             (when serializable " serializable"))
+            :pure-generators true
             :serializable serializable
             :initialized? (atom false)
             :members    (atom (into (sorted-set) (:nodes opts)))

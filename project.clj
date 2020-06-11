@@ -1,10 +1,10 @@
-(defproject jepsen.etcd "0.2.1-SNAPSHOT"
+(defproject jepsen.etcd "0.2.1"
   :description "etcd Jepsen test"
   :url "https://github.io/jepsen/etcd"
   :license {:name "EPL-2.0 OR GPL-2.0-or-later WITH Classpath-exception-2.0"
             :url "https://www.eclipse.org/legal/epl-2.0/"}
   :dependencies [[org.clojure/clojure "1.10.0"]
-                 [jepsen "0.2.0-SNAPSHOT"]
+                 [jepsen "0.2.0"]
                  [tech.droit/clj-diff "1.0.1"]
                  ; jetcd has a bunch of dep ranges we have to pin
                  [io.etcd/jetcd-core "0.4.1"

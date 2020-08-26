@@ -189,7 +189,13 @@
     (setup-primary! [_ test node])
 
     (primaries [_ test]
-      (list (primary test)))
+      (try+
+        (list (primary test))
+        (catch [:type :no-node-responded] e
+          [])
+        (catch [:type :jepsen.etcd.client/no-such-node] e
+          (warn e "Weird cluster state: unknown node ID, can't figure out what primary is right now")
+          [])))
 
     db/DB
     (setup! [db test node]

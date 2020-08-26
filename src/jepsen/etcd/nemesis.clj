@@ -36,7 +36,7 @@
 
 (defn member-final-generator
   "Until the cluster is full, emit grow events."
-  [test process]
+  [test context]
   (when (seq (db/addable-nodes test))
     {:type :info, :f :grow}))
 

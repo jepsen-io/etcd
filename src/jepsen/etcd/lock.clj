@@ -118,17 +118,19 @@
   (teardown! [this test])
 
   (close! [_ test]
-    (when-let [ll @lease+lock]
-      ; Since this process is terminating, it won't hold the lock any more.
-      (jc/conj-op! test {:type     :invoke
-                         :process  (:process ll)
-                         :f        :release
-                         :time     (relative-time-nanos)})
-      (c/close! (:listener ll))
-      (jc/conj-op! test {:type    :ok
-                         :process (:process ll)
-                         :f       :release
-                         :time    (relative-time-nanos)}))
+    ; This is... illegal under Jepsen 0.2.0, and it was sort of awful hack to
+    ; begin with. Not sure if we actually *need* it.
+    ; (when-let [ll @lease+lock]
+    ; Since this process is terminating, it won't hold the lock any more.
+    ;(jc/conj-op! test {:type     :invoke
+    ;                   :process  (:process ll)
+    ;                   :f        :release
+    ;                   :time     (relative-time-nanos)})
+    ;(c/close! (:listener ll))
+    ;(jc/conj-op! test {:type    :ok
+    ;                   :process (:process ll)
+    ;                   :f       :release
+    ;                   :time    (relative-time-nanos)}))
     (c/close! conn)))
 
 ; This client keeps a mutable vector of integers in memory, and uses an etcd
@@ -241,14 +243,14 @@
    :checker   (checker/compose
                 {:linear   (checker/linearizable {:model (model/mutex)})
                  :timeline (timeline/html)})
-   :generator (gen/mix [(acquires) (releases)])})
+   :generator (gen/mix [acquires releases])})
 
 (defn set-workload
   "Tests mutating an in-memory set."
   [opts]
   (let [adds (->> (range)
-                  (map (fn [x] {:type :invoke, :f :add, :value x})))
-        reads (repeat {:type :invoke, :f :read})]
+                  (map (fn [x] {:f :add, :value x})))
+        reads (repeat {:f :read})]
     {:client    (map->LockingSetClient {:lock-name    "foo"
                                         :latency      1000
                                         :set          (atom [])})

@@ -30,7 +30,9 @@
 (def workloads
   "A map of workload names to functions that construct workloads, given opts."
   {:append         append/workload
-   :lock           lock/workload
+   ; The lock workload used some Weird Stateful Hacks that don't work in Jepsen
+   ; 0.2.x.
+   ; :lock           lock/workload
    :lock-set       lock/set-workload
    :lock-etcd-set  lock/etcd-set-workload
    :none           (fn [_] tests/noop-test)

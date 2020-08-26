@@ -21,5 +21,7 @@
                                io.netty/netty-codec-http2]]
                  [io.netty/netty-codec-http2 "4.1.38.Final"]
                  [com.google.errorprone/error_prone_annotations "2.3.3"]]
+  :jvm-opts ["-Djava.awt.headless=true"
+             "-server"]
   :repl-options {:init-ns jepsen.etcd}
   :main jepsen.etcd)

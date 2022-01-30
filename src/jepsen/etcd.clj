@@ -123,6 +123,7 @@
   [["-v" "--version STRING" "What version of etcd should we install?"
     :default "3.4.3"]
    ["-w" "--workload NAME" "What workload should we run?"
+    :default :append
     :parse-fn keyword
     :validate [workloads (cli/one-of workloads)]]
    ["-s" "--serializable" "Use serializable reads, instead of going through consensus."]

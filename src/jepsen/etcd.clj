@@ -11,7 +11,7 @@
                     [independent :as independent]
                     [store :as store]
                     [tests :as tests]
-                    [util :as util :refer [parse-long map-vals]]]
+                    [util :as util :refer [map-vals]]]
             [jepsen.checker.timeline :as timeline]
             [jepsen.control.util :as cu]
             [jepsen.os.debian :as debian]

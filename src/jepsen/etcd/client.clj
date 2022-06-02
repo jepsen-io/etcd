@@ -14,7 +14,6 @@
            (io.etcd.jetcd ByteSequence
                           Client
                           ClientBuilder
-                          CloseableClient
                           Cluster
                           KeyValue
                           KV
@@ -174,7 +173,7 @@
   [node]
   (.. (Client/builder)
       (endpoints (into-array String [(support/client-url node)]))
-      (lazyInitialization false)
+      ; (lazyInitialization false)
       ; (loadBalancerPolicy "some string???")
       (build)))
 

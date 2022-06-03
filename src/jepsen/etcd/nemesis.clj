@@ -8,7 +8,8 @@
                     [util :as util]]
             [jepsen.nemesis.time :as nt]
             [jepsen.nemesis.combined :as nc]
-            [jepsen.etcd.db :as db]))
+            [jepsen.etcd.db :as db]
+            [slingshot.slingshot :refer [try+ throw+]]))
 
 (defn member-nemesis
   "A nemesis for adding and removing nodes from the cluster."
@@ -18,9 +19,14 @@
 
     (invoke! [this test op]
       (assoc op :value
-             (case (:f op)
-               :grow     (db/grow! test)
-               :shrink   (db/shrink! test))))
+             (try+
+               (case (:f op)
+                 :grow     (db/grow! test)
+                 :shrink   (db/shrink! test))
+               (catch [:type :jepsen.etcd.db/blank-member-name] e
+                 :blank-member-name)
+               (catch [:type :unhealthy-cluster] e
+                 :unhealthy-cluster))))
 
     (teardown! [this test])
 
@@ -30,8 +36,8 @@
 (defn member-generator
   "A generator for membership operations."
   [opts]
-  (->> (gen/mix [{:type :info, :f :grow}
-                 {:type :info, :f :shrink}])
+  (->> (gen/mix [(repeat {:type :info, :f :grow})
+                 (repeat {:type :info, :f :shrink})])
        (gen/delay (:interval opts))))
 
 (defn member-final-generator

@@ -130,7 +130,10 @@
       (swap! (:members test) conj new-node)
 
       ; And start the new node--it'll pick up the current members from the test
-      (c/on-nodes test [new-node] (partial db/start! (:db test)))
+      (c/on-nodes test [new-node]
+                  (fn [test node]
+                    (info :start! (class (:db test)) (pr-str (:db test)))
+                    (db/start! (:db test) test node)))
 
       new-node)
 
@@ -165,68 +168,70 @@
       (swap! (:members test) disj node)
       node)))
 
+(defrecord DB []
+  db/Process
+  (start! [_ test node]
+    (start! node
+            {:initial-cluster-state (if @(:initialized? test)
+                                      :existing
+                                      :new)
+             :nodes                 @(:members test)}))
+
+  (kill! [_ test node]
+    (c/su
+      (cu/stop-daemon! binary pidfile)))
+
+  db/Pause
+  (pause!  [_ test node] (c/su (cu/grepkill! :stop "etcd")))
+  (resume! [_ test node] (c/su (cu/grepkill! :cont "etcd")))
+
+  db/Primary
+  (setup-primary! [_ test node])
+
+  (primaries [_ test]
+    (try+
+      (list (primary test))
+      (catch [:type :no-node-responded] e
+        [])
+      (catch [:type :jepsen.etcd.client/no-such-node] e
+        (warn e "Weird cluster state: unknown node ID, can't figure out what primary is right now")
+        [])))
+
+  db/DB
+  (setup! [db test node]
+    (let [version (:version test)]
+      (info node "installing etcd" version)
+      (c/su
+        (let [url (str "https://storage.googleapis.com/etcd/v" version
+                       "/etcd-v" version "-linux-amd64.tar.gz")]
+          (cu/install-archive! url dir))))
+    (db/start! db test node)
+
+    ; Wait for node to come up
+    (let [c (client/client node)]
+      (try
+        (client/await-node-ready c)
+        (finally (client/close! c))))
+
+    ; Once everyone's done their initial startup, we set initialized? to
+    ; true, so future runs use --initial-cluster-state existing.
+    (jepsen/synchronize test)
+    (reset! (:initialized? test) true))
+
+  (teardown! [db test node]
+    (info node "tearing down etcd")
+    (db/kill! db test node)
+    (c/su (c/exec :rm :-rf dir)))
+
+  db/LogFiles
+  (log-files [_ test node]
+    ; hack hack hack
+    (meh (c/su (c/cd dir
+                     (c/exec :tar :cjf "data.tar.bz2" (str node ".etcd")))))
+    {logfile                   "etcd.log"
+     (str dir "/data.tar.bz2") "data.tar.bz2"}))
+
 (defn db
   "Etcd DB. Pulls version from test map's :version"
   []
-  (reify
-    db/Process
-    (start! [_ test node]
-      (start! node
-              {:initial-cluster-state (if @(:initialized? test)
-                                        :existing
-                                        :new)
-               :nodes                 @(:members test)}))
-
-    (kill! [_ test node]
-      (c/su
-        (cu/stop-daemon! binary pidfile)))
-
-    db/Pause
-    (pause!  [_ test node] (c/su (cu/grepkill! :stop "etcd")))
-    (resume! [_ test node] (c/su (cu/grepkill! :cont "etcd")))
-
-    db/Primary
-    (setup-primary! [_ test node])
-
-    (primaries [_ test]
-      (try+
-        (list (primary test))
-        (catch [:type :no-node-responded] e
-          [])
-        (catch [:type :jepsen.etcd.client/no-such-node] e
-          (warn e "Weird cluster state: unknown node ID, can't figure out what primary is right now")
-          [])))
-
-    db/DB
-    (setup! [db test node]
-      (let [version (:version test)]
-        (info node "installing etcd" version)
-        (c/su
-          (let [url (str "https://storage.googleapis.com/etcd/v" version
-                         "/etcd-v" version "-linux-amd64.tar.gz")]
-            (cu/install-archive! url dir))))
-      (db/start! db test node)
-
-      ; Wait for node to come up
-      (let [c (client/client node)]
-        (try
-          (client/await-node-ready c)
-          (finally (client/close! c))))
-
-      ; Once everyone's done their initial startup, we set initialized? to
-      ; true, so future runs use --initial-cluster-state existing.
-      (jepsen/synchronize test)
-      (reset! (:initialized? test) true))
-
-    (teardown! [db test node]
-      (info node "tearing down etcd")
-      (db/kill! db test node)
-      (c/su (c/exec :rm :-rf dir)))
-
-    db/LogFiles
-    (log-files [_ test node]
-      ; hack hack hack
-      (meh (c/su (c/cd dir
-                       (c/exec :tar :cjf "data.tar.bz2" (str node ".etcd")))))
-      [logfile
-       (str dir "/data.tar.bz2")])))
+  (DB.))

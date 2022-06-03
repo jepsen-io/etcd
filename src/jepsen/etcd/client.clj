@@ -274,6 +274,9 @@
                #"io exception"
                {:definite? false, :type :io-exception}
 
+               #"unhealthy cluster"
+               {:definite? true, :type :unhealthy-cluster}
+
                e#)))
 
          (catch java.net.ConnectException e#

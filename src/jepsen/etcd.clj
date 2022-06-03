@@ -1,5 +1,4 @@
 (ns jepsen.etcd
-  (:gen-class)
   (:require [clojure.tools.logging :refer [info warn]]
             [clojure.string :as str]
             [clojure.pprint :refer [pprint]]
@@ -111,7 +110,10 @@
             :generator (gen/phases
                          (->> (:generator workload)
                               (gen/stagger (/ (:rate opts)))
-                              (gen/nemesis (:generator nemesis))
+                              (gen/nemesis
+                                (gen/phases
+                                  (gen/sleep 5)
+                                  (:generator nemesis)))
                               (gen/time-limit (:time-limit opts)))
                          (gen/log "Healing cluster")
                          (gen/nemesis (:final-generator nemesis))
@@ -122,22 +124,28 @@
 (def cli-opts
   "Additional command line options."
   [["-v" "--version STRING" "What version of etcd should we install?"
-    :default "3.4.3"]
+    :default "3.5.3"]
+
    ["-w" "--workload NAME" "What workload should we run?"
     :default :append
     :parse-fn keyword
     :validate [workloads (cli/one-of workloads)]]
+
    ["-s" "--serializable" "Use serializable reads, instead of going through consensus."]
+
    ["-r" "--rate HZ" "Approximate number of requests per second, per thread."
     :default  10
     :parse-fn read-string
     :validate [#(and (number? %) (pos? %)) "Must be a positive number"]]
+
    [nil "--ops-per-key NUM" "Maximum number of operations on any given key."
     :default  200
     :parse-fn parse-long
     :validate [pos? "Must be a positive integer."]]
+
    [nil "--only-workloads-expected-to-pass" "Don't run tests which we know fail."
     :default false]
+
    [nil "--nemesis FAULTS" "A comma-separated list of nemesis faults to enable"
     :parse-fn parse-nemesis-spec
     :validate [(partial every? #{:pause :kill :partition :clock :member})

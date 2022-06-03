@@ -51,6 +51,10 @@
 (def all-nemeses
   "Combinations of nemeses for tests"
   [[]
+   [:pause]
+   [:kill]
+   [:partition]
+   [:member]
    [:pause :kill :partition :clock :member]])
 
 (def special-nemeses
@@ -71,7 +75,7 @@
   :concurrency ...), constructs a test map. Special options:
 
       :quorum       Whether to use quorum reads
-      :rate         Approximate number of requests per second, per thread
+      :rate         Approximate number of requests per second
       :ops-per-key  Maximum number of operations allowed on any given key.
       :workload     Name of the workload to run."
   [opts]
@@ -133,8 +137,8 @@
 
    ["-s" "--serializable" "Use serializable reads, instead of going through consensus."]
 
-   ["-r" "--rate HZ" "Approximate number of requests per second, per thread."
-    :default  10
+   ["-r" "--rate HZ" "Approximate number of requests per second"
+    :default  200
     :parse-fn read-string
     :validate [#(and (number? %) (pos? %)) "Must be a positive number"]]
 

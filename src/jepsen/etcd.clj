@@ -1,4 +1,5 @@
 (ns jepsen.etcd
+  (:gen-class)
   (:require [clojure.tools.logging :refer [info warn]]
             [clojure.string :as str]
             [clojure.pprint :refer [pprint]]

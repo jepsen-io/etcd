@@ -17,4 +17,7 @@
   :jvm-opts ["-Djava.awt.headless=true"
              "-server"]
   :repl-options {:init-ns jepsen.etcd}
-  :main jepsen.etcd)
+  :main jepsen.etcd
+  :aot :all
+  :profiles {:uberjar {:target-path "target/uberjar"
+                       :aot :all}})

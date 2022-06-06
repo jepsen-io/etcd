@@ -105,7 +105,7 @@
                       (:results res))]
     (if (:succeeded? res)
       (assoc (:op t) :type :ok, :value txn')
-      (assoc (:op t) :type :fail))))
+      (assoc (:op t) :type :fail, :error :didn't-succeed))))
 
 (defrecord TxnClient [conn]
   client/Client

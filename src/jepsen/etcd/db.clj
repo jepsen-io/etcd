@@ -169,34 +169,6 @@
       node)))
 
 (defrecord DB []
-  db/Process
-  (start! [_ test node]
-    (start! node
-            {:initial-cluster-state (if @(:initialized? test)
-                                      :existing
-                                      :new)
-             :nodes                 @(:members test)}))
-
-  (kill! [_ test node]
-    (c/su
-      (cu/stop-daemon! binary pidfile)))
-
-  db/Pause
-  (pause!  [_ test node] (c/su (cu/grepkill! :stop "etcd")))
-  (resume! [_ test node] (c/su (cu/grepkill! :cont "etcd")))
-
-  db/Primary
-  (setup-primary! [_ test node])
-
-  (primaries [_ test]
-    (try+
-      (list (primary test))
-      (catch [:type :no-node-responded] e
-        [])
-      (catch [:type :jepsen.etcd.client/no-such-node] e
-        (warn e "Weird cluster state: unknown node ID, can't figure out what primary is right now")
-        [])))
-
   db/DB
   (setup! [db test node]
     (let [version (:version test)]
@@ -229,7 +201,35 @@
     (meh (c/su (c/cd dir
                      (c/exec :tar :cjf "data.tar.bz2" (str node ".etcd")))))
     {logfile                   "etcd.log"
-     (str dir "/data.tar.bz2") "data.tar.bz2"}))
+     (str dir "/data.tar.bz2") "data.tar.bz2"})
+
+  db/Primary
+  (setup-primary! [_ test node])
+
+  (primaries [_ test]
+    (try+
+      (list (primary test))
+      (catch [:type :no-node-responded] e
+        [])
+      (catch [:type :jepsen.etcd.client/no-such-node] e
+        (warn e "Weird cluster state: unknown node ID, can't figure out what primary is right now")
+        [])))
+
+  db/Process
+  (start! [_ test node]
+    (start! node
+            {:initial-cluster-state (if @(:initialized? test)
+                                      :existing
+                                      :new)
+             :nodes                 @(:members test)}))
+
+  (kill! [_ test node]
+    (c/su
+      (cu/stop-daemon! binary pidfile)))
+
+  db/Pause
+  (pause!  [_ test node] (c/su (cu/grepkill! :stop "etcd")))
+  (resume! [_ test node] (c/su (cu/grepkill! :cont "etcd"))))
 
 (defn db
   "Etcd DB. Pulls version from test map's :version"

@@ -91,7 +91,10 @@
                                                               :existing)
       :--initial-advertise-peer-urls  (s/peer-url node)
       :--initial-cluster              (initial-cluster (:nodes opts))
-      (when (:unsafe-no-fsync test) :--unsafe-no-fsync))))
+      (when (:unsafe-no-fsync test) :--unsafe-no-fsync)
+      :--snapshot-count               (:snapshot-count test)
+      :--experimental-initial-corrupt-check
+      )))
 
 (defn kill!
   "Kills etcd."

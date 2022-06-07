@@ -109,6 +109,9 @@
                            :clock       (checker/clock-plot)
                            :stats       (checker/stats)
                            :exceptions  (checker/unhandled-exceptions)
+                           :crash       (checker/log-file-pattern
+                                          #"\"level\":\"fatal\""
+                                          "etcd.log")
                            :workload    (:checker workload)})
             :client    (:client workload)
             :generator (gen/phases
@@ -148,6 +151,11 @@
     :validate [#(and (number? %) (pos? %)) "Must be a positive number"]]
 
    ["-s" "--serializable" "Use serializable reads, instead of going through consensus."]
+
+   [nil "--snapshot-count COUNT" "Number of committed transactions to trigger a snapshot to disk. Passed to etcd."
+    :default 100
+    :parse-fn parse-long
+    :validate [(complement neg?) "Must not be negative."]]
 
    [nil "--tcpdump" "If set, tracks client traffic using tcpdump."]
 

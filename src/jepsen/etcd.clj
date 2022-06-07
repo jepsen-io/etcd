@@ -83,7 +83,7 @@
   (let [serializable  (boolean (:serializable opts))
         workload-name (:workload opts)
         workload      ((workloads workload-name) opts)
-        db            (db/db)
+        db            (db/db opts)
         nemesis       (nemesis/nemesis-package
                         {:db        db
                          :nodes     (:nodes opts)
@@ -102,7 +102,7 @@
             :initialized? (atom false)
             :members    (atom (into (sorted-set) (:nodes opts)))
             :os         debian/os
-            :db         (db/db)
+            :db         db
             :nemesis    (:nemesis nemesis)
             :checker    (checker/compose
                           {:perf        (checker/perf {:nemeses (:perf nemesis)})
@@ -127,20 +127,12 @@
 
 (def cli-opts
   "Additional command line options."
-  [["-v" "--version STRING" "What version of etcd should we install?"
-    :default "3.5.3"]
+  [[nil "--lazyfs" "Mounts etcd in a lazyfs, and causes the kill nemesis to also wipe our unfsynced data files."]
 
-   ["-w" "--workload NAME" "What workload should we run?"
-    :default :append
-    :parse-fn keyword
-    :validate [workloads (cli/one-of workloads)]]
-
-   ["-s" "--serializable" "Use serializable reads, instead of going through consensus."]
-
-   ["-r" "--rate HZ" "Approximate number of requests per second"
-    :default  200
-    :parse-fn read-string
-    :validate [#(and (number? %) (pos? %)) "Must be a positive number"]]
+   [nil "--nemesis FAULTS" "A comma-separated list of nemesis faults to enable"
+    :parse-fn parse-nemesis-spec
+    :validate [(partial every? #{:pause :kill :partition :clock :member})
+               "Faults must be pause, kill, partition, clock, or member, or the special faults all or none."]]
 
    [nil "--ops-per-key NUM" "Maximum number of operations on any given key."
     :default  200
@@ -150,13 +142,22 @@
    [nil "--only-workloads-expected-to-pass" "Don't run tests which we know fail."
     :default false]
 
-   [nil "--nemesis FAULTS" "A comma-separated list of nemesis faults to enable"
-    :parse-fn parse-nemesis-spec
-    :validate [(partial every? #{:pause :kill :partition :clock :member})
-               "Faults must be pause, kill, partition, clock, or member, or the special faults all or none."]]
+   ["-r" "--rate HZ" "Approximate number of requests per second"
+    :default  200
+    :parse-fn read-string
+    :validate [#(and (number? %) (pos? %)) "Must be a positive number"]]
+
+   ["-s" "--serializable" "Use serializable reads, instead of going through consensus."]
 
    [nil "--tcpdump" "If set, tracks client traffic using tcpdump."]
 
+   ["-v" "--version STRING" "What version of etcd should we install?"
+    :default "3.5.3"]
+
+   ["-w" "--workload NAME" "What workload should we run?"
+    :default :append
+    :parse-fn keyword
+    :validate [workloads (cli/one-of workloads)]]
    ])
 
 (defn all-test-options

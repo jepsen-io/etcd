@@ -6,6 +6,7 @@
             [jepsen [control :as c]
                     [core :as jepsen]
                     [db :as db]
+                    [lazyfs :as lazyfs]
                     [util :as util :refer [meh
                                            random-nonempty-subset]]]
             [jepsen.control.util :as cu]
@@ -19,11 +20,19 @@
 (def logfile (str dir "/etcd.log"))
 (def pidfile (str dir "/etcd.pid"))
 
+(defn data-dir
+  "Where does this node store its data on disk?"
+  [node]
+  (str dir "/" node ".etcd"))
+
 (defn wipe!
   "Wipes data files on the current node."
-  [node]
+  [test node]
   (c/su
-    (c/exec :rm :-rf (str dir "/" node ".etcd"))))
+    (c/exec :rm :-rf (str dir "/" node ".etcd")))
+  ; We don't want these files coming back when lazyfs loses unsynced writes
+  (when (:lazyfs test)
+    (-> test :db :lazyfs lazyfs/checkpoint!)))
 
 (defn from-highest-term
   "Takes a test and a function (f node client). Evaluates that function with a
@@ -82,6 +91,11 @@
                                                               :existing)
       :--initial-advertise-peer-urls  (s/peer-url node)
       :--initial-cluster              (initial-cluster (:nodes opts)))))
+
+(defn kill!
+  "Kills etcd."
+  []
+  (c/su (cu/stop-daemon! binary pidfile)))
 
 (defn members
   "Takes a test, asks all nodes for their membership, and returns the highest
@@ -160,26 +174,31 @@
       ; when it restarts
       (c/on-nodes test [node]
                   (fn [test node]
-                    (db/kill! (:db test) test node)
+                    (kill! (:db test) test node)
                     (info "Wiping" node)
-                    (wipe! node)))
+                    (wipe! test node)))
 
       ; Record that the node's gone
       (swap! (:members test) disj node)
       node)))
 
-(defrecord DB [tcpdump]
+(defrecord DB [tcpdump lazyfs]
   db/DB
   (setup! [db test node]
     (when (:tcpdump test)
       (db/setup! tcpdump test node))
 
+    ; Install
     (let [version (:version test)]
       (info node "installing etcd" version)
       (c/su
         (let [url (str "https://storage.googleapis.com/etcd/v" version
                        "/etcd-v" version "-linux-amd64.tar.gz")]
           (cu/install-archive! url dir))))
+
+    (when (:lazyfs test)
+      (db/setup! (lazyfs node) test node))
+
     (db/start! db test node)
 
     ; Wait for node to come up
@@ -191,11 +210,16 @@
     ; Once everyone's done their initial startup, we set initialized? to
     ; true, so future runs use --initial-cluster-state existing.
     (jepsen/synchronize test)
-    (reset! (:initialized? test) true))
+    (reset! (:initialized? test) true)
+
+    (when (:lazyfs test)
+      (lazyfs/checkpoint! (lazyfs node))))
 
   (teardown! [db test node]
+    (when (:lazyfs test)
+      (db/teardown! (lazyfs node) test node))
     (info node "tearing down etcd")
-    (db/kill! db test node)
+    (kill!)
     (c/su (c/exec :rm :-rf dir))
     (when (:tcpdump test)
       (db/teardown! tcpdump test node)))
@@ -204,10 +228,11 @@
   (log-files [_ test node]
     ; hack hack hack
     (meh (c/su (c/cd dir
-                     (c/exec :tar :cjf "data.tar.bz2" (str node ".etcd")))))
+                     (c/exec :tar :cjf "data.tar.bz2" (data-dir node)))))
     (merge {logfile                   "etcd.log"
-            (str dir "/data.tar.bz2") "data.tar.bz2"})
-           (when (:tcpdump test) (db/log-files tcpdump test node)))
+            (str dir "/data.tar.bz2") "data.tar.bz2"}
+           (when (:tcpdump test) (db/log-files tcpdump test node))
+           (when (:lazyfs test)  (db/log-files (lazyfs node) test node))))
 
   db/Primary
   (setup-primary! [_ test node])
@@ -230,15 +255,22 @@
              :nodes                 @(:members test)}))
 
   (kill! [_ test node]
-    (c/su
-      (cu/stop-daemon! binary pidfile)))
+    (kill!)
+    (when (:lazyfs test)
+      (lazyfs/lose-unfsynced-writes! (lazyfs node))))
 
   db/Pause
   (pause!  [_ test node] (c/su (cu/grepkill! :stop "etcd")))
   (resume! [_ test node] (c/su (cu/grepkill! :cont "etcd"))))
 
 (defn db
-  "Etcd DB. Pulls version from test map's :version"
-  []
+  "Etcd DB. Pulls version from test map's :version. Takes parsed CLI options."
+  [opts]
   (map->DB {:tcpdump (db/tcpdump {:clients-only? true
-                                  :ports [2379]})}))
+                                  :ports [2379]})
+            ; A map of nodes to the lazyfs DB for that node. We do this because
+            ; each node names its data directory differently.
+            :lazyfs  (->> (:nodes opts)
+                          (map (fn [node]
+                                 [node (lazyfs/db {:dir (data-dir node)})]))
+                          (into (sorted-map)))}))

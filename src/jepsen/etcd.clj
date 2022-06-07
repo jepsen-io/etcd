@@ -151,6 +151,8 @@
 
    [nil "--tcpdump" "If set, tracks client traffic using tcpdump."]
 
+   [nil "--unsafe-no-fsync" "Asks etcd not to fsync."]
+
    ["-v" "--version STRING" "What version of etcd should we install?"
     :default "3.5.3"]
 

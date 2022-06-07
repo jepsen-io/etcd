@@ -73,7 +73,7 @@
 
     :initial-cluster-state    Either :new or :existing
     :nodes                    A set of nodes that will comprise the cluster."
-  [node opts]
+  [test node opts]
   (c/su
     (cu/start-daemon!
       {:logfile logfile
@@ -90,7 +90,8 @@
       :--initial-cluster-state        (:initial-cluster-state opts
                                                               :existing)
       :--initial-advertise-peer-urls  (s/peer-url node)
-      :--initial-cluster              (initial-cluster (:nodes opts)))))
+      :--initial-cluster              (initial-cluster (:nodes opts))
+      (when (:unsafe-no-fsync test) :--unsafe-no-fsync))))
 
 (defn kill!
   "Kills etcd."
@@ -248,7 +249,7 @@
 
   db/Process
   (start! [_ test node]
-    (start! node
+    (start! test node
             {:initial-cluster-state (if @(:initialized? test)
                                       :existing
                                       :new)
@@ -272,5 +273,6 @@
             ; each node names its data directory differently.
             :lazyfs  (->> (:nodes opts)
                           (map (fn [node]
-                                 [node (lazyfs/db {:dir (data-dir node)})]))
+                                 [node (lazyfs/db {:dir (data-dir node)
+                                                   :cache-size "2GB"})]))
                           (into (sorted-map)))}))

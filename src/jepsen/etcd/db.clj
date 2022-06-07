@@ -168,9 +168,12 @@
       (swap! (:members test) disj node)
       node)))
 
-(defrecord DB []
+(defrecord DB [tcpdump]
   db/DB
   (setup! [db test node]
+    (when (:tcpdump test)
+      (db/setup! tcpdump test node))
+
     (let [version (:version test)]
       (info node "installing etcd" version)
       (c/su
@@ -193,15 +196,18 @@
   (teardown! [db test node]
     (info node "tearing down etcd")
     (db/kill! db test node)
-    (c/su (c/exec :rm :-rf dir)))
+    (c/su (c/exec :rm :-rf dir))
+    (when (:tcpdump test)
+      (db/teardown! tcpdump test node)))
 
   db/LogFiles
   (log-files [_ test node]
     ; hack hack hack
     (meh (c/su (c/cd dir
                      (c/exec :tar :cjf "data.tar.bz2" (str node ".etcd")))))
-    {logfile                   "etcd.log"
-     (str dir "/data.tar.bz2") "data.tar.bz2"})
+    (merge {logfile                   "etcd.log"
+            (str dir "/data.tar.bz2") "data.tar.bz2"})
+           (when (:tcpdump test) (db/log-files tcpdump test node)))
 
   db/Primary
   (setup-primary! [_ test node])
@@ -234,4 +240,5 @@
 (defn db
   "Etcd DB. Pulls version from test map's :version"
   []
-  (DB.))
+  (map->DB {:tcpdump (db/tcpdump {:clients-only? true
+                                  :ports [2379]})}))

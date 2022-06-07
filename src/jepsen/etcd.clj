@@ -153,7 +153,11 @@
    [nil "--nemesis FAULTS" "A comma-separated list of nemesis faults to enable"
     :parse-fn parse-nemesis-spec
     :validate [(partial every? #{:pause :kill :partition :clock :member})
-               "Faults must be pause, kill, partition, clock, or member, or the special faults all or none."]]])
+               "Faults must be pause, kill, partition, clock, or member, or the special faults all or none."]]
+
+   [nil "--tcpdump" "If set, tracks client traffic using tcpdump."]
+
+   ])
 
 (defn all-test-options
   "Takes base cli options, a collection of nemeses, workloads, and a test count,

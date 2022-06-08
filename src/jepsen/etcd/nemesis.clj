@@ -77,13 +77,20 @@
       (try+ (let [r (client/compact! (rand-nth (vals clients)))]
               (assoc op :value r))
             (catch client/client-error? e
-              (assoc op :value :compact-failed, :error e)))))
+              (assoc op :value :compact-failed, :error e)))
 
       :defrag
-      (try+ (c/on-nodes test value
-                        (fn [_ _]
-                          (info "Defragmenting")
-                          (db/etcdctl! :defrag))))
+      (->> (c/on-nodes test value
+                       (fn [_ _]
+                         (info "Defragmenting")
+                         (try+
+                           (db/etcdctl! :defrag)
+                           :defragged
+                           (catch [:exit 1] e
+                             (condp re-find (:err e)
+                               #"deadline exceeded" :deadline-exceeded
+                               (:err e))))))
+           (assoc op :value))))
 
   (teardown! [this test]
     (->> (vals clients)

@@ -31,7 +31,8 @@
                                   MemberAddResponse
                                   MemberListResponse
                                   MemberRemoveResponse)
-           (io.etcd.jetcd.kv GetResponse
+           (io.etcd.jetcd.kv CompactResponse
+                             GetResponse
                              PutResponse
                              TxnResponse)
            (io.etcd.jetcd.lease LeaseGrantResponse
@@ -45,7 +46,8 @@
                              Op
                              Op$PutOp
                              Op$GetOp)
-           (io.etcd.jetcd.options GetOption
+           (io.etcd.jetcd.options CompactOption
+                                  GetOption
                                   PutOption
                                   WatchOption)
            (io.etcd.jetcd.watch WatchEvent
@@ -74,6 +76,9 @@
   nil          (->clj [x] x)
 
   ByteSequence (->clj [bs] (bytes-> bs))
+
+  CompactResponse (->clj [c]
+                    {:header (->clj (.getHeader c))})
 
   GetResponse (->clj [r]
                 {:count  (.getCount r)
@@ -247,6 +252,12 @@
                    {:definite? true, :type :duplicate-key, :description desc#}
                    e#)
 
+                 Status$Code/OUT_OF_RANGE
+                 (condp re-find desc#
+                   #"revision has been compacted"
+                   {:definite? true, :type :revision-compacted, :description desc#}
+                   e#)
+
                  Status$Code/UNKNOWN
                  (condp re-find desc#
                    #"leader changed"
@@ -325,12 +336,28 @@
                           :info)
                   :error [(:type e#) (:description e#)]))))
 
+(declare revision)
+
 ; KV ops
 
 (defn ^KV kv-client
   "Extracts a KV client from a client."
   [^Client c]
   (.getKVClient c))
+
+(defn compact!
+  "Compacts history up to the given rev. Compacts physically--blocks until GC
+  is complete. If no revision provided, compacts to the most recent revision."
+  ([client]
+   (compact! client (revision client)))
+  ([client ^long rev]
+   (info "Compacting to revision" rev)
+   (-> client kv-client
+       (.compact rev (.. (CompactOption/newBuilder)
+                         (withCompactPhysical true)
+                         build))
+       await
+       ->clj)))
 
 (defn put!
   "Sets key to value, synchronously."
@@ -617,3 +644,8 @@
            (watch-consumer f)
            (reify Consumer (accept [_ e] (err-f e)))
            complete-f)))
+
+(defn revision
+  "Returns the most current revision for this client."
+  [c]
+  (-> c (get* "") :header :revision))

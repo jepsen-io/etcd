@@ -9,7 +9,8 @@
                     [lazyfs :as lazyfs]
                     [util :as util :refer [meh
                                            random-nonempty-subset]]]
-            [jepsen.control.util :as cu]
+            [jepsen.control [net :as cn]
+                            [util :as cu]]
             [jepsen.os.debian :as debian]
             [jepsen.etcd [client :as client]
                          [support :as s]]
@@ -24,6 +25,13 @@
   "Where does this node store its data on disk?"
   [node]
   (str dir "/" node ".etcd"))
+
+(defn etcdctl!
+  "Runs an etcdctl command on the local node."
+  [& args]
+  (c/su
+    (c/exec (str dir "/etcdctl")
+            :--endpoints (s/client-url (cn/local-ip)) args)))
 
 (defn wipe!
   "Wipes data files on the current node."
@@ -178,7 +186,7 @@
       ; when it restarts
       (c/on-nodes test [node]
                   (fn [test node]
-                    (kill! (:db test) test node)
+                    (db/kill! (:db test) test node)
                     (info "Wiping" node)
                     (wipe! test node)))
 

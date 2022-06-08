@@ -2,13 +2,15 @@
   "Nemeses for etcd"
   (:require [clojure.pprint :refer [pprint]]
             [clojure.tools.logging :refer [info warn]]
-            [jepsen [nemesis :as n]
+            [jepsen [control :as c]
+                    [nemesis :as n]
                     [generator :as gen]
                     [net :as net]
                     [util :as util]]
             [jepsen.nemesis.time :as nt]
             [jepsen.nemesis.combined :as nc]
-            [jepsen.etcd.db :as db]
+            [jepsen.etcd [client :as client]
+                         [db :as db]]
             [slingshot.slingshot :refer [try+ throw+]]))
 
 (defn member-nemesis
@@ -31,14 +33,14 @@
     (teardown! [this test])
 
     n/Reflection
-    (fs [_] [:grow :shrink])))
+    (fs [_] #{:grow :shrink})))
 
 (defn member-generator
   "A generator for membership operations."
   [opts]
   (->> (gen/mix [(repeat {:type :info, :f :grow})
                  (repeat {:type :info, :f :shrink})])
-       (gen/delay (:interval opts))))
+       (gen/stagger (:interval opts))))
 
 (defn member-final-generator
   "Until the cluster is full, emit grow events."
@@ -60,11 +62,73 @@
                    :fs    [:shrink]
                    :color "#ACA0E9"}}}))
 
+(defrecord AdminNemesis [clients]
+  n/Nemesis
+  (setup! [this test]
+    (assoc this :clients
+           (->> (:nodes test)
+                (map (fn [node]
+                       [node (client/client node)]))
+                (into {}))))
+
+  (invoke! [this test {:keys [f value] :as op}]
+    (case f
+      :compact
+      (try+ (let [r (client/compact! (rand-nth (vals clients)))]
+              (assoc op :value r))
+            (catch client/client-error? e
+              (assoc op :value :compact-failed, :error e)))))
+
+      :defrag
+      (try+ (c/on-nodes test value
+                        (fn [_ _]
+                          (info "Defragmenting")
+                          (db/etcdctl! :defrag))))
+
+  (teardown! [this test]
+    (->> (vals clients)
+         (mapv client/close!)))
+
+  n/Reflection
+  (fs [_] #{:compact :defrag}))
+
+(defn admin-generator
+  "Generates periodic compact/defrag ops."
+  [opts]
+  (->> (gen/mix [(fn [test ctx]
+                   (let [nodes (if (< 0.5 (rand))
+                                 (:nodes test)
+                                 (util/random-nonempty-subset (:nodes test)))]
+                     {:type :info, :f :defrag, :value nodes}))
+                 (repeat {:type :info, :f :compact})])
+       (gen/stagger (:interval opts))))
+
+(defn admin-final-generator
+  "During recovery, compact and defrag."
+  []
+  [{:type :info, :f :compact}
+   {:type :info, :f :defrag}])
+
+(defn admin-package
+  "A combined nemesis package for administrative operations."
+  [opts]
+  (when (contains? (:faults opts) :admin)
+    {:nemesis         (AdminNemesis. nil)
+     :generator       (admin-generator opts)
+     :final-generator (admin-final-generator)
+     :perf            #{{:name "compact"
+                         :fs [:compact]
+                         :color "#2021CC"}
+                        {:name "defrag"
+                         :fs [:defrag]
+                         :color "#BE20CC"}}}))
+
 (defn nemesis-package
   "Constructs a nemesis and generators for etcd."
   [opts]
   (let [opts (update opts :faults set)]
     (-> (nc/nemesis-packages opts)
-        (concat [(member-package opts)])
+        (concat [(member-package opts)
+                 (admin-package opts)])
         (->> (remove nil?))
         nc/compose-packages)))

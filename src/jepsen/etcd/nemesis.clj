@@ -123,11 +123,15 @@
     {:nemesis         (AdminNemesis. nil)
      :generator       (admin-generator opts)
      :final-generator (admin-final-generator)
-     :perf            #{{:name "compact"
-                         :fs [:compact]
+     :perf            #{{:name  "compact"
+                         :fs    #{:compact}
+                         :start #{}
+                         :stop  #{}
                          :color "#2021CC"}
-                        {:name "defrag"
-                         :fs [:defrag]
+                        {:name  "defrag"
+                         :fs    #{:defrag}
+                         :start #{}
+                         :stop  #{}
                          :color "#BE20CC"}}}))
 
 (defn nemesis-package

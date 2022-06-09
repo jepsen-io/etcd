@@ -108,15 +108,20 @@
             :os         debian/os
             :db         db
             :nemesis    (:nemesis nemesis)
-            :checker    (checker/compose
-                          {:perf        (checker/perf {:nemeses (:perf nemesis)})
-                           :clock       (checker/clock-plot)
-                           :stats       (checker/stats)
-                           :exceptions  (checker/unhandled-exceptions)
-                           :crash       (checker/log-file-pattern
-                                          #"\"level\":\"fatal\""
-                                          "etcd.log")
-                           :workload    (:checker workload)})
+            :checker
+            (checker/compose
+              {:perf        (checker/perf {:nemeses (:perf nemesis)})
+               :clock       (checker/clock-plot)
+               :stats       (checker/stats)
+               :exceptions  (checker/unhandled-exceptions)
+               :crash       (checker/log-file-pattern
+                              ; Ignore matches like "couldn't find local name
+                              ; "n1" in initial cluster; we get these when we
+                              ; restart nodes that don't belong in the group
+                              ; due to membership changes.
+                              #"\"level\":\"fatal\"(?!.*couldn't find local name)"
+                              "etcd.log")
+               :workload    (:checker workload)})
             :client    (:client workload)
             :generator (gen/phases
                          (->> (:generator workload)

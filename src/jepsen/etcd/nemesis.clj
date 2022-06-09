@@ -54,7 +54,12 @@
   (when ((:faults opts) :member)
     {:nemesis   (member-nemesis opts)
      :generator (member-generator opts)
-     :final-generator (gen/delay 1 member-final-generator)
+     :final-generator (->> member-final-generator
+                           (gen/delay 1)
+                           ; It's possible for the cluster to get stuck in a
+                           ; way that can't be grown--for instance, with
+                           ; permanently blank member names.
+                           (gen/time-limit 60))
      :perf      #{{:name  "grow"
                    :fs    [:grow]
                    :color "#E9A0E6"}

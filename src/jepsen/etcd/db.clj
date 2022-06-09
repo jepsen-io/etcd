@@ -102,6 +102,7 @@
       (when (:unsafe-no-fsync test) :--unsafe-no-fsync)
       :--snapshot-count               (:snapshot-count test)
       :--experimental-initial-corrupt-check
+      :--experimental-corrupt-check-time    "1m"
       )))
 
 (defn kill!

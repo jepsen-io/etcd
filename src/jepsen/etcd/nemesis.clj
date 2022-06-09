@@ -7,8 +7,9 @@
                     [generator :as gen]
                     [net :as net]
                     [util :as util]]
-            [jepsen.nemesis.time :as nt]
-            [jepsen.nemesis.combined :as nc]
+            [jepsen.control [util :as cu]]
+            [jepsen.nemesis [combined :as nc]
+                            [time :as nt]]
             [jepsen.etcd [client :as client]
                          [db :as db]]
             [slingshot.slingshot :refer [try+ throw+]]))
@@ -139,12 +140,49 @@
                          :stop  #{}
                          :color "#BE20CC"}}}))
 
+(defn rand-data-file
+  "Picks a random etcd data file on the given node."
+  [test node]
+  (let [data  (db/data-dir node)
+        wal  (str data "/member/wal")
+        snap (str data "/member/snap")
+        dir  (rand-nth [wal snap])]
+    (get (c/on-nodes test [node]
+                     (fn [_ _]
+                       (rand-nth (cu/ls-full dir))))
+         node)))
+
+(defn bitflip-generator
+  "Generator of file bitflip operations. We restrict these to a minority of
+  nodes to avoid breaking the whole cluster."
+  [test context]
+  (let [nodes     (:nodes test)
+        n         (count nodes)
+        targets   (take (dec (util/majority n)) nodes)
+        node      (rand-nth targets)]
+    {:type  :info
+     :f     :bitflip
+     :value {node {:file        (rand-data-file test node)
+                   :probability 0.001}}}))
+
+(defn corrupt-package
+  "A nemesis package for datafile corruption"
+  [opts]
+  (when (contains? (:faults opts) :corrupt)
+    {:nemesis   (n/bitflip)
+     :generator (->> bitflip-generator
+                     (gen/stagger (:interval opts)))
+     :perf      #{{:name "corrupt"
+                   :fs   #{:bitflip :truncate}
+                   :color "#99F2E2"}}}))
+
 (defn nemesis-package
   "Constructs a nemesis and generators for etcd."
   [opts]
   (let [opts (update opts :faults set)]
     (-> (nc/nemesis-packages opts)
         (concat [(member-package opts)
+                 (corrupt-package opts)
                  (admin-package opts)])
         (->> (remove nil?))
         nc/compose-packages)))

@@ -50,7 +50,7 @@
 
 (def nemeses
   "All nemeses"
-  #{:admin :corrupt-wal :corrupt-snap :truncate-wal :pause :kill :partition
+  #{:admin :bitflip-wal :bitflip-snap :truncate-wal :pause :kill :partition
     :clock :member})
 
 (def all-nemeses
@@ -60,18 +60,20 @@
    [:kill      :admin]
    [:partition :admin]
    [:member    :admin]
-   [:truncate-wal :admin]
-   [:truncate-wal :kill]
-   [:corrupt-wal :corrupt-snap :admin]
-   [:corrupt-wal :corrupt-snap :kill]
-   [:admin :corrupt-snap :corrupt-wal :truncate-wal :pause :kill :partition
-    :clock :member]])
+   ; Truncates are fairly boring because the WAL is zeroed out to a fixed size
+   ; at creation time.
+   ;[:truncate-wal :admin]
+   ;[:truncate-wal :kill]
+   [:bitflip-wal :bitflip-snap :admin]
+   [:bitflip-wal :bitflip-snap :kill]
+   [:admin :bitflip-snap :bitflip-wal :pause :kill :partition :clock :member]])
 
 (def special-nemeses
   "A map of special nemesis names to collections of faults"
-  {:none []
-   :all  [:admin :pause :kill :corrupt-wal :corrupt-snap :truncate-wal
-          :partition :clock :member]})
+  {:none             []
+   :corrupt          [:bitflip-wal :bitflip-snap :truncate-wal]
+   :all              [:admin :pause :kill :bitflip-wal :bitflip-snap
+                      :truncate-wal :partition :clock :member]})
 
 (defn parse-nemesis-spec
   "Takes a comma-separated nemesis string and returns a collection of keyword
@@ -102,7 +104,7 @@
                          :partition {:targets [:primaries :majority :majorities-ring]}
                          :pause     {:targets [:primaries :all]}
                          :kill      {:targets [:primaries :all]}
-                         :interval  5})]
+                         :interval  (:nemesis-interval opts)})]
     (merge tests/noop-test
            opts
            {:name       (str "etcd " (name workload-name)
@@ -154,6 +156,10 @@
                                  (or (nemeses nem)
                                      (special-nemeses nem))))
                (cli/one-of (concat nemeses (keys special-nemeses)))]]
+
+   [nil "--nemesis-interval SECONDS" "How long between nemesis operations for each class of fault"
+    :parse-fn read-string
+    :validate [pos? "Must be positive"]]
 
    [nil "--ops-per-key NUM" "Maximum number of operations on any given key."
     :default  200

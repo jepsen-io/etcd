@@ -153,38 +153,41 @@
                        (rand-nth (cu/ls-full dir))))
          node)))
 
-(defn bitflip-generator
-  "Generator of file bitflip operations. We restrict these to a minority of
-  nodes to avoid breaking the whole cluster."
+(defn corrupt-generator
+  "Generator of file bitflip/truncation operations. We restrict these to a
+  minority of nodes to avoid breaking the whole cluster."
   [{:keys [faults]}]
-  (let [wal?  (contains? faults :corrupt-wal)
-        snap? (contains? faults :corrupt-snap)
-        ; Function to generate a random type of file to mess with
-        rand-type (cond (and wal? snap?) #(rand-nth [:wal :snap])
-                        wal?             (constantly :wal)
-                        snap?            (constantly :snap)
-                        :else            nil)]
-    (info :wal? wal? :snap? snap?)
-    (when rand-type
+  (let [bitflip-wal?  (contains? faults :bitflip-wal)
+        bitflip-snap? (contains? faults :bitflip-snap)
+        truncate-wal? (contains? faults :truncate-wal)
+        ; Possible types of faults and types of files to mess with
+        fault+types   (cond-> []
+                        bitflip-wal?  (conj [:bitflip :wal])
+                        bitflip-snap? (conj [:bitflip :snap])
+                        truncate-wal? (conj [:truncate :wal]))]
+    (when (seq fault+types)
       (fn gen [test context]
-        (let [nodes     (:nodes test)
-              n         (count nodes)
-              targets   (take (dec (util/majority n)) nodes)
-              node      (rand-nth targets)
-              type      (rand-type)
-              file      (rand-data-file test node type)]
+        (let [nodes        (:nodes test)
+              n            (count nodes)
+              targets      (take (dec (util/majority n)) nodes)
+              node         (rand-nth targets)
+              [fault type] (rand-nth fault+types)
+              file         (rand-data-file test node type)]
           {:type  :info
-           :f     (keyword (str "bitflip-" (name type)))
-           :value {node {:file        file
-                         :probability 0.001}}})))))
+           :f     (keyword (str (name fault) "-" (name type)))
+           :value {node (cond-> {:file file}
+                          (= fault :truncate) (assoc :drop (rand-int 1024))
+                          (= fault :bitflip)  (assoc :probability
+                                                     (rand-nth [1e-3 1e-4 1e-5])))}})))))
 
 (defn corrupt-package
   "A nemesis package for datafile corruption"
   [opts]
   {:nemesis   (n/compose
                 {{:bitflip-wal :bitflip
-                  :bitflip-snap :bitflip} (n/bitflip)})
-   :generator (->> (bitflip-generator opts)
+                  :bitflip-snap :bitflip}  (n/bitflip)
+                 {:truncate-wal :truncate} (n/truncate-file)})
+   :generator (->> (corrupt-generator opts)
                    (gen/stagger (:interval opts)))
    :perf      #{{:name "corrupt"
                  :fs   #{:bitflip-wal :bitflip-snap

@@ -103,16 +103,17 @@
   "Tests linearizable reads, writes, and compare-and-set operations on
   independent keys."
   [opts]
-  {:client    (Client. nil)
-   :checker   (independent/checker
-                (checker/compose
-                  {:linear   (checker/linearizable
-                               {:model (->VersionedRegister 0 nil)})
-                   :timeline (timeline/html)}))
-   :generator (independent/concurrent-generator
-                10
-                (range)
-                (fn [k]
-                  (->> (gen/mix [w cas])
-                       (gen/reserve 5 r)
-                       (gen/limit (:ops-per-key opts)))))})
+  (let [n (count (:nodes opts))]
+    {:client    (Client. nil)
+     :checker   (independent/checker
+                  (checker/compose
+                    {:linear   (checker/linearizable
+                                 {:model (->VersionedRegister 0 nil)})
+                     :timeline (timeline/html)}))
+     :generator (independent/concurrent-generator
+                  (* 2 n)
+                  (range)
+                  (fn [k]
+                    (->> (gen/mix [w cas])
+                         (gen/reserve n r)
+                         (gen/limit (:ops-per-key opts)))))}))

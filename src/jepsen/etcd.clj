@@ -158,6 +158,7 @@
                (cli/one-of (concat nemeses (keys special-nemeses)))]]
 
    [nil "--nemesis-interval SECONDS" "How long between nemesis operations for each class of fault"
+    :default  5
     :parse-fn read-string
     :validate [pos? "Must be positive"]]
 
@@ -188,8 +189,19 @@
    ["-v" "--version STRING" "What version of etcd should we install?"
     :default "3.5.3"]
 
-   ["-w" "--workload NAME" "What workload should we run?"
+   ])
+
+(def test-cli-opts
+  "CLI options just for test"
+   [["-w" "--workload NAME" "What workload should we run?"
     :default :append
+    :parse-fn keyword
+    :validate [workloads (cli/one-of workloads)]]
+   ])
+
+(def test-all-cli-opts
+  "CLI options just for test-all"
+   [["-w" "--workload NAME" "What workload should we run?"
     :parse-fn keyword
     :validate [workloads (cli/one-of workloads)]]
    ])
@@ -219,8 +231,10 @@
   browsing results."
   [& args]
   (cli/run! (merge (cli/single-test-cmd {:test-fn  etcd-test
-                                         :opt-spec cli-opts})
+                                         :opt-spec (into cli-opts
+                                                         test-cli-opts)})
                    (cli/test-all-cmd {:tests-fn (partial all-tests etcd-test)
-                                      :opt-spec cli-opts})
+                                      :opt-spec (into cli-opts
+                                                      test-all-cli-opts)})
                    (cli/serve-cmd))
             args))

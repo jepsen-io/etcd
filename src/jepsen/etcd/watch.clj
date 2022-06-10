@@ -3,7 +3,8 @@
   return a list of the versions it went through. At the end of the test, we
   confirm that everyone observed all the writes in the correct order."
   (:require [clojure.tools.logging :refer [info warn]]
-            [clojure.string :as str]
+            [clojure [pprint :refer [pprint]]
+                     [string :as str]]
             [clj-diff.core :as diff]
             [knossos.op :as op]
             [jepsen [checker :as checker]
@@ -345,17 +346,23 @@
                               :nonmonotonic-errors nm-errors))))))
 
 (defn workload
+  "We allocate the first node-count threads as writers, and the remaining
+  threads as watchers."
   [opts]
-  {:client    (Client. nil "w" (atom 0) nil
-                       (converger (count (:nodes opts))
-                                  (fn [ms] (apply = (map :revision ms)))))
-   :checker   (checker)
-   :generator (let [write (->> (range)
-                               (map (fn [x] {:type :invoke, :f :write, :value x})))
-                    watch (repeat {:type :invoke, :f :watch})]
-                (gen/reserve (count (:nodes opts)) write
-                             watch))
-   :final-generator (gen/phases (gen/reserve (count (:nodes opts)) nil
-                                 (gen/each-thread
-                                   {:type :invoke
-                                    :f    :final-watch})))})
+  (let [node-count  (count (:nodes opts))
+        watch-count (- (:concurrency opts) node-count)
+        converger   (converger watch-count
+                               (fn converged? [ms]
+                                 (apply = (map :revision ms))))]
+    {:client    (Client. nil "w" (atom 0) nil converger)
+     :checker   (checker)
+     :generator (let [write (->> (range)
+                                 (map (fn [x]
+                                        {:type :invoke :f :write :value x})))
+                      watch (repeat {:type :invoke, :f :watch})]
+                  (gen/reserve node-count write
+                               watch))
+     :final-generator (gen/reserve node-count nil
+                                   (gen/each-thread
+                                     {:type :invoke
+                                      :f    :final-watch}))}))

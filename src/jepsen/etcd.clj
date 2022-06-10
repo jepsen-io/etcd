@@ -50,22 +50,28 @@
 
 (def nemeses
   "All nemeses"
-  #{:admin :corrupt :pause :kill :partition :clock :member})
+  #{:admin :corrupt-wal :corrupt-snap :truncate-wal :pause :kill :partition
+    :clock :member})
 
 (def all-nemeses
   "Combinations of nemeses for tests"
   [[:admin]
    [:pause     :admin]
    [:kill      :admin]
-   [:corrupt   :admin]
    [:partition :admin]
    [:member    :admin]
-   [:admin     :pause :kill :partition :clock :member]])
+   [:truncate-wal :admin]
+   [:truncate-wal :kill]
+   [:corrupt-wal :corrupt-snap :admin]
+   [:corrupt-wal :corrupt-snap :kill]
+   [:admin :corrupt-snap :corrupt-wal :truncate-wal :pause :kill :partition
+    :clock :member]])
 
 (def special-nemeses
   "A map of special nemesis names to collections of faults"
   {:none []
-   :all  [:admin :pause :kill :corrupt :partition :clock :member]})
+   :all  [:admin :pause :kill :corrupt-wal :corrupt-snap :truncate-wal
+          :partition :clock :member]})
 
 (defn parse-nemesis-spec
   "Takes a comma-separated nemesis string and returns a collection of keyword

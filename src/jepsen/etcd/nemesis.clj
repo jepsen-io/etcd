@@ -141,12 +141,13 @@
                          :color "#BE20CC"}}}))
 
 (defn rand-data-file
-  "Picks a random etcd data file on the given node."
-  [test node]
+  "Picks a random etcd data file on the given node. Type can be either :wal or
+  :snap."
+  [test node type]
   (let [data  (db/data-dir node)
-        wal  (str data "/member/wal")
-        snap (str data "/member/snap")
-        dir  (rand-nth [wal snap])]
+        dir  (case type
+               :wal  (str data "/member/wal")
+               :snap (str data "/member/snap"))]
     (get (c/on-nodes test [node]
                      (fn [_ _]
                        (rand-nth (cu/ls-full dir))))
@@ -155,26 +156,40 @@
 (defn bitflip-generator
   "Generator of file bitflip operations. We restrict these to a minority of
   nodes to avoid breaking the whole cluster."
-  [test context]
-  (let [nodes     (:nodes test)
-        n         (count nodes)
-        targets   (take (dec (util/majority n)) nodes)
-        node      (rand-nth targets)]
-    {:type  :info
-     :f     :bitflip
-     :value {node {:file        (rand-data-file test node)
-                   :probability 0.001}}}))
+  [{:keys [faults]}]
+  (let [wal?  (contains? faults :corrupt-wal)
+        snap? (contains? faults :corrupt-snap)
+        ; Function to generate a random type of file to mess with
+        rand-type (cond (and wal? snap?) #(rand-nth [:wal :snap])
+                        wal?             (constantly :wal)
+                        snap?            (constantly :snap)
+                        :else            nil)]
+    (info :wal? wal? :snap? snap?)
+    (when rand-type
+      (fn gen [test context]
+        (let [nodes     (:nodes test)
+              n         (count nodes)
+              targets   (take (dec (util/majority n)) nodes)
+              node      (rand-nth targets)
+              type      (rand-type)
+              file      (rand-data-file test node type)]
+          {:type  :info
+           :f     (keyword (str "bitflip-" (name type)))
+           :value {node {:file        file
+                         :probability 0.001}}})))))
 
 (defn corrupt-package
   "A nemesis package for datafile corruption"
   [opts]
-  (when (contains? (:faults opts) :corrupt)
-    {:nemesis   (n/bitflip)
-     :generator (->> bitflip-generator
-                     (gen/stagger (:interval opts)))
-     :perf      #{{:name "corrupt"
-                   :fs   #{:bitflip :truncate}
-                   :color "#99F2E2"}}}))
+  {:nemesis   (n/compose
+                {{:bitflip-wal :bitflip
+                  :bitflip-snap :bitflip} (n/bitflip)})
+   :generator (->> (bitflip-generator opts)
+                   (gen/stagger (:interval opts)))
+   :perf      #{{:name "corrupt"
+                 :fs   #{:bitflip-wal :bitflip-snap
+                         :truncate-wal :truncate-snap}
+                 :color "#99F2E2"}}})
 
 (defn nemesis-package
   "Constructs a nemesis and generators for etcd."

@@ -88,8 +88,8 @@
       nil))
 
 (defn converge!
-  "Takes a converger, an initial value, and a function which evolves values
-  over time.
+  "Takes a timeout in ms, a converger, an initial value, and a function which
+  evolves values over time.
 
   When `converge` is called, evaluates `evolve` repeatedly, starting with the
   initial value; each successive invocation receives the result of the previous
@@ -101,9 +101,11 @@
 
   If evolve throws, horrible things will happen. Probably deadlock or livelock.
   I should fix this later."
-  [converger init evolve]
+  [timeout converger init evolve]
   ; Acquire our unique thread index
-  (let [i (-> (swap! converger update :threads conj (Thread/currentThread))
+  (let [deadline (+ (util/linear-time-nanos)
+                    (util/ms->nanos timeout))
+        i (-> (swap! converger update :threads conj (Thread/currentThread))
               :threads
               count
               dec)]
@@ -114,6 +116,11 @@
               ; concurrency barrier, and it *is* broken.
               (:crashed? c)
               (throw (BrokenBarrierException. "Convergence failed"))
+
+              ; If the deadline has passed, throw a timeout with our value.
+              (< deadline (util/linear-time-nanos))
+              (throw+ {:type  ::converge-timeout
+                       :value (-> converger deref :values (get i))})
 
               ; If we're converged, return our value
               (converged? c)
@@ -234,26 +241,30 @@
           (assoc op :type :ok, :value res))
 
         :final-watch
-        (let [v (converge!
-                  converger
-                  {:revision @revision, :log []}
-                  (fn [v]
-                    (let [rev (:revision v)
-                          log (:log v)]
-                      (try+ (c/remap-errors
-                              (let [_ (info "at rev" rev "catching up to"
-                                            @max-revision)
-                                    w (watch-for conn (:process op) k rev
-                                                 (rand-int 5000))]
-                                ; Advance our revisions
-                                (reset! revision (:revision w))
-                                (swap! max-revision max (:revision w))
-                                (assoc w :log (into (:log v) (:log w)))))
-                            (catch c/client-error? e
-                              (warn e "caught during final-watch; retrying")
-                              (Thread/sleep 1000)
-                              v)))))]
-          (assoc op :type :ok, :value v)))))
+        (try+
+          (let [v (converge!
+                    60000
+                    converger
+                    {:revision @revision, :log []}
+                    (fn [v]
+                      (let [rev (:revision v)
+                            log (:log v)]
+                        (try+ (c/remap-errors
+                                (let [_ (info "at rev" rev "catching up to"
+                                              @max-revision)
+                                      w (watch-for conn (:process op) k rev
+                                                   (rand-int 5000))]
+                                  ; Advance our revisions
+                                  (reset! revision (:revision w))
+                                  (swap! max-revision max (:revision w))
+                                  (assoc w :log (into (:log v) (:log w)))))
+                              (catch c/client-error? e
+                                (warn e "caught during final-watch; retrying")
+                                (Thread/sleep 1000)
+                                v)))))]
+            (assoc op :type :ok, :value v))
+          (catch [:type ::converge-timeout] e
+            (assoc op :type :ok, :value (:value e), :error [:converge-timeout]))))))
 
   (teardown! [this test])
 

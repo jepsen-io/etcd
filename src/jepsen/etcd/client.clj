@@ -273,6 +273,9 @@
                    #"mutex: session is expired"
                    {:definite? false, :type :mutex-session-expired}
 
+                   #"etcdserver: too many requests"
+                   {:definite? true, :type, :etcdserver-too-many-requests}
+
                    (do (info "Unknown code=UNKNOWN description" (pr-str desc#))
                        e#))
 

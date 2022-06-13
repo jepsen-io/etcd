@@ -80,8 +80,9 @@
   (invoke! [this test {:keys [f value] :as op}]
     (case f
       :compact
-      (try+ (let [r (client/compact! (rand-nth (vals clients)))]
-              (assoc op :value r))
+      (try+ (client/remap-errors
+              (let [r (client/compact! (rand-nth (vals clients)))]
+                (assoc op :value r)))
             (catch client/client-error? e
               (assoc op :value :compact-failed, :error e)))
 

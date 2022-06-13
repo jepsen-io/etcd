@@ -270,6 +270,9 @@
                    #"raft: stopped"
                    {:definite? true, :type :raft-stopped}
 
+                   #"mutex: session is expired"
+                   {:definite? false, :type :mutex-session-expired}
+
                    (do (info "Unknown code=UNKNOWN description" (pr-str desc#))
                        e#))
 

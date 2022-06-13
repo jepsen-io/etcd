@@ -26,6 +26,7 @@
                           Watch$Listener
                           Watch$Watcher)
            (io.etcd.jetcd.common.exception ClosedClientException
+                                           CompactedException
                                            EtcdException)
            (io.etcd.jetcd.cluster Member
                                   MemberAddResponse
@@ -234,6 +235,9 @@
       :definite?    Is this error definitely a failure, or could it be ok?"
   [& body]
   `(try+ (unwrap-exceptions ~@body)
+         (catch CompactedException e#
+           (throw+ {:definite? true, :type :compacted, :description (.getMessage e#)}))
+
          (catch StatusRuntimeException e#
            (throw+
              (let [status# (.getStatus e#)

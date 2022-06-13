@@ -151,7 +151,8 @@
                :snap (str data "/member/snap"))]
     (get (c/on-nodes test [node]
                      (fn [_ _]
-                       (rand-nth (cu/ls-full dir))))
+                       (c/su
+                         (rand-nth (cu/ls-full dir)))))
          node)))
 
 (defn corrupt-generator

@@ -15,7 +15,8 @@
                  [io.netty/netty-handler-proxy "4.1.74.Final"]
                  ]
   :jvm-opts ["-Djava.awt.headless=true"
-             "-server"]
+             "-server"
+             "-Xmx24g"]
   :repl-options {:init-ns jepsen.etcd}
   :main jepsen.etcd
   :profiles {:uberjar {:target-path "target/uberjar"

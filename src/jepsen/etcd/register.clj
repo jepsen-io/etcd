@@ -41,7 +41,7 @@
                    (assoc op
                           :type  :ok
                           :value (independent/tuple k [version value]))
-                   (assoc op :type :fail)))))))
+                   (assoc op :type :fail, :error :did-not-succeed)))))))
 
   (teardown! [this test])
 

@@ -1,4 +1,4 @@
-(defproject jepsen.etcd "0.2.2"
+(defproject jepsen.etcd "0.2.3-SNAPSHOT"
   :description "etcd Jepsen test"
   :url "https://github.io/jepsen/etcd"
   :license {:name "EPL-2.0 OR GPL-2.0-or-later WITH Classpath-exception-2.0"

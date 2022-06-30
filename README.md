@@ -8,13 +8,13 @@ cluster](https://github.com/jepsen-io/jepsen).
 To run a full test suite, run
 
 ```sh
-lein run test-all --concurrency 2n
+lein run test-all --concurrency 2n --rate 1000
 ```
 
 You can focus in on particular combinations of faults, or particular workloads:
 
 ```sh
-lein run test-all --concurrency 2n --workload lock
+lein run test-all --concurrency 2n --workload append
 lein run test-all --concurrency 2n --nemesis kill,partition
 ```
 

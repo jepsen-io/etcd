@@ -12,3 +12,7 @@ pom.xml.asc
 .hgignore
 .hg/
 *.swp
+.calva
+.clj-kondo
+.lsp
+hs_err_pid*.log

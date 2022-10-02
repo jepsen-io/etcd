@@ -227,6 +227,14 @@
        (catch java.util.concurrent.ExecutionException e#
          (throw (original-cause e#)))))
 
+(defn re-find+
+  "Like re-find, but returns nil for nil strings instead of throwing. Jetcd
+  likes to throw errors with missing message strings sometimes."
+  [pattern string]
+  (if (nil? string)
+    nil
+    (re-find pattern string)))
+
 (defmacro remap-errors
   "Evaluates body, converting errors to thrown Slingshot maps with fields:
 
@@ -251,19 +259,19 @@
                  {:definite? true, :type :not-found, :description desc#}
 
                  Status$Code/INVALID_ARGUMENT
-                 (condp re-find desc#
+                 (condp re-find+ desc#
                    #"duplicate key"
                    {:definite? true, :type :duplicate-key, :description desc#}
                    e#)
 
                  Status$Code/OUT_OF_RANGE
-                 (condp re-find desc#
+                 (condp re-find+ desc#
                    #"revision has been compacted"
                    {:definite? true, :type :revision-compacted, :description desc#}
                    e#)
 
                  Status$Code/UNKNOWN
-                 (condp re-find desc#
+                 (condp re-find+ desc#
                    #"leader changed"
                    {:definite? false, :type :leader-changed}
 
@@ -282,12 +290,12 @@
                  ; Fall back to regular expressions on status messages
                  (do (info "Unknown error status code" (.getCode status#)
                            "-" status# "-" e#)
-                     (condp re-find desc#
+                     (condp re-find+ desc#
                        e#))))))
 
          (catch EtcdException e#
            (throw+
-             (condp re-find (.getMessage e#)
+             (condp re-find+ (.getMessage e#)
                ; what even is this???
                #"Network closed for unknown reason"
                {:definite? false, :type :network-closed-unknown-reason}
@@ -307,7 +315,7 @@
 
          (catch java.io.IOException e#
            (throw+
-             (condp re-find (.getMessage e#)
+             (condp re-find+ (.getMessage e#)
                #"Connection reset by peer"
                {:definite? false, :type :connection-reset}
 
@@ -315,7 +323,7 @@
 
          (catch java.lang.IllegalStateException e#
            (throw+
-             (condp re-find (.getMessage e#)
+             (condp re-find+ (.getMessage e#)
                ; Oooh, this one's rare
                #"call already half-closed"
                {:definite? false, :type :call-already-half-closed}

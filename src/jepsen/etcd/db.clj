@@ -99,10 +99,11 @@
                                                               :existing)
       :--initial-advertise-peer-urls  (s/peer-url node)
       :--initial-cluster              (initial-cluster (:nodes opts))
-      (when (:unsafe-no-fsync test) :--unsafe-no-fsync)
       :--snapshot-count               (:snapshot-count test)
-      :--experimental-initial-corrupt-check
-      :--experimental-corrupt-check-time    "1m"
+      (when (:unsafe-no-fsync test) :--unsafe-no-fsync)
+      (when (:corrupt-check test)
+        [:--experimental-initial-corrupt-check
+         :--experimental-corrupt-check-time    "1m"])
       )))
 
 (defn kill!

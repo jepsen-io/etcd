@@ -148,7 +148,9 @@
 
 (def cli-opts
   "Additional command line options."
-  [[nil "--lazyfs" "Mounts etcd in a lazyfs, and causes the kill nemesis to also wipe our unfsynced data files."]
+  [[nil "--corrupt-check" "If set, enables etcd's experimental corruption checking options"]
+
+   [nil "--lazyfs" "Mounts etcd in a lazyfs, and causes the kill nemesis to also wipe our unfsynced data files."]
 
    [nil "--nemesis FAULTS" "A comma-separated list of nemesis faults to enable"
     :parse-fn parse-nemesis-spec

@@ -215,7 +215,7 @@
   client/Client
   (open! [this test node]
     (assoc this
-           :conn (c/client node)
+           :conn (c/client test node)
            :revision (atom 0)))
 
   (setup! [this test])

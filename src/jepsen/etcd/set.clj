@@ -9,7 +9,7 @@
 (defrecord SetClient [k conn]
   client/Client
   (open! [this test node]
-    (assoc this :conn (c/client node)))
+    (assoc this :conn (c/client test node)))
 
   (setup! [_ test]
     (c/put! conn k #{}))

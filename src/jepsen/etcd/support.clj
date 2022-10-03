@@ -1,6 +1,10 @@
 (ns jepsen.etcd.support
   (:require [clojure.string :as str]
-            [jepsen.control.net :as c.net]))
+            [jepsen [control :as c]]
+            [jepsen.control [core :as c.core]
+                            [net :as c.net]]))
+
+(def dir "/opt/etcd")
 
 (defn node-url
   "An HTTP url for connecting to a node on a particular port."
@@ -25,3 +29,24 @@
        (map (fn [node]
               (str node "=" (peer-url node))))
        (str/join ",")))
+
+(defn etcdctl!
+  "Runs an etcdctl command with the current control session, against the local
+  node. Takes an optional :in argument, after which should come a stdin
+  string."
+  [& args]
+  (let [[command [_ stdin]] (split-with (complement #{:in}) args)
+        cmd (->> [(str dir "/etcdctl")
+                  :--endpoints (client-url (c.net/local-ip))
+                  command]
+                 (map c/escape)
+                 (str/join " "))
+        action {:cmd cmd, :in stdin}]
+    (c/su
+      (-> action
+          c/wrap-cd
+          c/wrap-sudo
+          c/wrap-trace
+          c/ssh*
+          c.core/throw-on-nonzero-exit
+          c/just-stdout))))

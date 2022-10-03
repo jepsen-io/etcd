@@ -13,6 +13,7 @@
                                ]]
                  [io.netty/netty-codec-http2 "4.1.74.Final"]
                  [io.netty/netty-handler-proxy "4.1.74.Final"]
+                 [cheshire "5.11.0"]
                  ]
   :jvm-opts ["-Djava.awt.headless=true"
              "-server"

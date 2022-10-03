@@ -16,7 +16,7 @@
                          [support :as s]]
             [slingshot.slingshot :refer [throw+ try+]]))
 
-(def dir "/opt/etcd")
+(def dir s/dir)
 (def binary "etcd")
 (def logfile (str dir "/etcd.log"))
 (def pidfile (str dir "/etcd.pid"))
@@ -25,13 +25,6 @@
   "Where does this node store its data on disk?"
   [node]
   (str dir "/" node ".etcd"))
-
-(defn etcdctl!
-  "Runs an etcdctl command on the local node."
-  [& args]
-  (c/su
-    (c/exec (str dir "/etcdctl")
-            :--endpoints (s/client-url (cn/local-ip)) args)))
 
 (defn wipe!
   "Wipes data files on the current node."

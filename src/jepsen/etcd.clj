@@ -148,7 +148,12 @@
 
 (def cli-opts
   "Additional command line options."
-  [[nil "--corrupt-check" "If set, enables etcd's experimental corruption checking options"]
+  [[nil "--client-type TYPE" "What kind of client should we use? Either jetcd or etcdctl."
+    :default :jetcd
+    :parse-fn keyword
+    :validate [#{:etcdctl :jetcd} (cli/one-of #{:etcdctl :jetcd})]]
+
+    [nil "--corrupt-check" "If set, enables etcd's experimental corruption checking options"]
 
    [nil "--lazyfs" "Mounts etcd in a lazyfs, and causes the kill nemesis to also wipe our unfsynced data files."]
 

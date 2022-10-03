@@ -11,7 +11,8 @@
             [jepsen.nemesis [combined :as nc]
                             [time :as nt]]
             [jepsen.etcd [client :as client]
-                         [db :as db]]
+                         [db :as db]
+                         [support :as s]]
             [slingshot.slingshot :refer [try+ throw+]]))
 
 (defn member-nemesis
@@ -91,7 +92,7 @@
                        (fn [_ _]
                          (info "Defragmenting")
                          (try+
-                           (db/etcdctl! :defrag)
+                           (s/etcdctl! :defrag)
                            :defragged
                            (catch [:exit 1] e
                              (condp re-find (:err e)

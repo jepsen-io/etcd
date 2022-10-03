@@ -55,6 +55,7 @@
   "Takes a transaction with reads, and constructs a collection of guards
   verifying each read's revision is intact."
   [t]
+  (info :guards (select-keys t [:reads :read-revision]))
   (map (fn [k]
          (if-let [v (get (:reads t) k)]
            ; If the key existed, we go by its modification revision
@@ -110,7 +111,7 @@
 (defrecord TxnClient [conn]
   client/Client
   (open! [this test node]
-    (assoc this :conn (c/client node)))
+    (assoc this :conn (c/client test node)))
 
   (setup! [_ test])
 

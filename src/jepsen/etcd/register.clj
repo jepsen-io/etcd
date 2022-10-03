@@ -15,7 +15,7 @@
 (defrecord Client [conn]
   client/Client
   (open! [this test node]
-    (assoc this :conn (c/client node)))
+    (assoc this :conn (c/client test node)))
 
   (setup! [this test])
 

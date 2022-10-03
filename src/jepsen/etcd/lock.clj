@@ -92,7 +92,7 @@
   client/Client
   (open! [this test node]
     (assoc this
-           :conn (c/client node)
+           :conn (c/client test node)
            :lease+lock (atom nil)))
 
   (setup! [this test])
@@ -139,7 +139,7 @@
 (defrecord LockingSetClient [conn lock-name latency set]
   client/Client
   (open! [this test node]
-    (assoc this :conn (c/client node)))
+    (assoc this :conn (c/client test node)))
 
   (setup! [this test])
 
@@ -185,7 +185,7 @@
 (defrecord LockingEtcdSetClient [conn lock-name latency k]
   client/Client
   (open! [this test node]
-    (assoc this :conn (c/client node)))
+    (assoc this :conn (c/client test node)))
 
   (setup! [this test])
 

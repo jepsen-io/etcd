@@ -4,42 +4,66 @@
   rather than bytes."
   (:require [clojure [edn :as edn]
                      [string :as str]]
+            [clojure.java.io :as io]
             [clojure.tools.logging :refer [info warn]]
             [cheshire.core :as json]
             [jepsen [control :as c]
+                    [store :as store]
                     [util :as util :refer [coll]]]
             [jepsen.etcd [support :as support]]
             [jepsen.etcd.client.support :as s]
             [slingshot.slingshot :refer [try+ throw+]])
-  (:import (java.util Base64)))
+  (:import (java.util Base64)
+           (java.io Writer)))
+
+(def client-number
+  "Just for internal logging: a unique number for each client created."
+  (atom 0))
+
+(def log-dir
+  "Where should we write logs?"
+  "etcdctl-logs")
 
 (defn etcdctl!
-  "Runs an etcdctl command, passing the given stdin and returning parsed JSON."
-  [test node cmd in]
-  (try+ (let [res (val (first (c/on-nodes test [node]
-                                          (fn [_ _]
-                                            (support/etcdctl! [cmd :-w :json]
-                                                              :in in)))))]
-          (json/parse-string res true))
-        ; Rewrite errors
-        (catch [:type :jepsen.control/nonzero-exit, :exit 1] e
-          (let [err (:err e)
-                ;_ (warn :caught err)
-                first-msg (first (str/split-lines (:err e)))]
-            (if (re-find #"^\{" first-msg)
-              ; Maybe JSON?
-              (let [parsed (json/parse-string (:err e) true)
-                    error  (:error parsed)]
-                ; They squirrel away the actual error message in an error
-                ; field--msg is often something useless like "retrying of unary
-                ; invoker failed"
-                ;(warn parsed)
-                (throw+
-                  (condp re-find error
-                    #"duplicate key"
-                    {:definite? true, :type :duplicate-key, :description error})))
-              ; Not JSON
-              (throw+ {:definite? false, :type :etcdctl, :description err}))))))
+  "Runs an etcdctl command over the given jepsen.control session, passing the
+  given stdin and returning parsed JSON."
+  [node session cmd in]
+  (util/timeout
+    5000 (throw+ {:type :etcdctl-timeout,
+                  :definite? false})
+    (try+ (let [res (c/with-session node session
+                      (support/etcdctl!
+                        [cmd
+                         :-w :json
+                         :--dial-timeout "1s"
+                         :--command-timeout "5s"]
+                        :in in))]
+            (json/parse-string res true))
+          ; Rewrite errors
+          (catch [:type :jepsen.control/nonzero-exit, :exit 1] e
+            (let [err (:err e)
+                  ;_ (warn :caught err)
+                  first-msg (first (str/split-lines (:err e)))]
+              (if (re-find #"^\{" first-msg)
+                ; Maybe JSON?
+                (let [parsed (json/parse-string (:err e) true)
+                      error  (:error parsed)]
+                  ; They squirrel away the actual error message in an error
+                  ; field--msg is often something useless like "retrying of
+                  ; unary invoker failed"
+                  ;(warn parsed)
+                  (throw+
+                    (condp re-find error
+                      #"duplicate key"
+                      {:definite? true, :type :duplicate-key, :description error}
+
+                      #"error reading from server: EOF"
+                      {:definite? false, :type :eof}
+
+                      {:definite? false, :type :etcdtcl, :description error})))
+
+                ; Not JSON
+                (throw+ {:definite? false, :type :etcdctl, :description err})))))))
 
 (defn parse-header
   "Interprets a header"
@@ -112,11 +136,11 @@
           (case type
             :txn (let [[pred t-branch f-branch] args]
                    (str/join "\n"
-                             (concat (map txn->text (coll pred))
+                             (concat (map txn->text pred)
                                      [""]
-                                     (map txn->text (coll t-branch))
+                                     (map txn->text t-branch)
                                      [""]
-                                     (map txn->text (coll f-branch))
+                                     (map txn->text f-branch)
                                      ["\n"])))
 
             ; arrrrgh they encode the syntax tree two incompatible ways between
@@ -135,29 +159,57 @@
             :put (str "put " (first args) " " (txn->text (pr-str (second args))))
             :get (str "get " (first args))))))
 
-(defrecord EtcdctlClient [test node]
+(defprotocol Log
+  (log [this msg]))
+
+(defrecord EtcdctlClient [number, ^Writer log, node, session]
   s/Client
   (txn!
     [this pred t-branch f-branch]
-    (let [txn [:txn pred t-branch f-branch]
-          _   (info :txn txn "\n" (txn->text txn))
-         raw-res (etcdctl! test node :txn (txn->text txn))
-         _    (info :raw-res (util/pprint-str raw-res))
-         res (parse-res raw-res)
-         ; Parse get/put results
-         _    (info :parsed (util/pprint-str res))
-         res (-> res
-                 (dissoc :responses)
-                 (assoc :results
-                        (->> res
-                             :responses)))]
-      (info :res (util/pprint-str res))
-      res))
+    (try
+      (.write log "\n-------------------------------------------------\n")
+      (let [txn  [:txn pred t-branch f-branch]
+            text (txn->text txn)
+            _    (.write log (str (util/local-time)))
+            _    (.write log "\n")
+            _    (.write log text)
+            ;_   (info :txn txn "\n" (txn->text txn))
+            raw-res (etcdctl! node session :txn text)
+            _       (.write log (util/pprint-str raw-res))
+            _       (.write log "\n")
+            ;_    (info :raw-res (util/pprint-str raw-res))
+            res (parse-res raw-res)
+            _   (.write log (util/pprint-str res))
+            ; Parse get/put results
+            ;_    (info :parsed (util/pprint-str res))
+            res (-> res
+                    (dissoc :responses)
+                    (assoc :results
+                           (->> res
+                                :responses)))]
+        ;(info :res (util/pprint-str res))
+        res)
+      (catch Throwable t
+        (.write log (str "Error: " t "\n\n"))
+        (throw t))))
+
+  Log
+  (log [this msg]
+    (.write log msg)
+    (.write log "\n"))
 
   java.lang.AutoCloseable
-  (close [this]))
+  (close [this]
+    (.flush log)
+    (.close log)
+    (c/disconnect session)))
 
 (defn client
   "Constructs a client for the given test and node."
   [test node]
-  (EtcdctlClient. test node))
+  (let [client-number (swap! client-number inc)]
+    (EtcdctlClient. client-number
+                    (io/writer (store/path! test log-dir
+                                            (str client-number ".log")))
+                    node
+                    (c/session node))))

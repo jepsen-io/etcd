@@ -2,6 +2,7 @@
   (:require [clojure.tools.logging :refer [info warn]]
             [clojure.string :as str]
             [clojure.pprint :refer [pprint]]
+            [dom-top.core :refer [loopr]]
             [jepsen [checker :as checker]
                     [cli :as cli]
                     [client :as client]
@@ -248,3 +249,30 @@
                                                       test-all-cli-opts)})
                    (cli/serve-cmd))
             args))
+
+;; Repl stuff
+
+(defn txn-dirs
+  "Extracts a set of test directories from every transaction's reads in a test"
+  [test]
+  (let [xf (comp (keep :debug)
+                 (map :read-res)
+                 (mapcat :results)
+                 (map :kvs)
+                 (mapcat vals)
+                 (map :value)
+                 (map :dir))]
+    (into #{} xf (:history test))))
+
+(defn all-txns-dirs
+  "Maps test start times to their directories."
+  []
+  (loopr [m (sorted-map)]
+         [test (next (reverse (store/all-tests)))]
+         (let [test @test
+               _    (prn :checking (:start-time test))
+               dirs (txn-dirs test)]
+           (prn dirs)
+           (if (seq dirs)
+             (recur (assoc m (:start-time test) dirs))
+             m))))

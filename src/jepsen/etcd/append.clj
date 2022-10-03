@@ -7,6 +7,7 @@
             [jepsen [client :as client]
                     [checker :as checker]
                     [generator :as gen]
+                    [store :as store]
                     [util :as util :refer [map-vals pprint-str]]]
             [jepsen.tests.cycle :as cycle]
             [jepsen.tests.cycle.append :as append]
@@ -37,7 +38,10 @@
   that value."
   [t v]
   (if (:debug (:test t))
-    {:txn (:txn t), :value v}
+    {:time (str (util/local-time))
+     :dir  (.getName (store/path (:test t)))
+     :txn (:txn t),
+     :value v}
     v))
 
 (defn decode-get

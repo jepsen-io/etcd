@@ -64,7 +64,8 @@
            (io.grpc Status$Code
                     StatusRuntimeException)
            (io.grpc.stub StreamObserver)
-           (io.netty.channel StacklessClosedChannelException)))
+           ;(io.netty.channel StacklessClosedChannelException)
+           ))
 
 (def timeout
   "A default timeout, in ms."
@@ -286,8 +287,8 @@
          (catch CompactedException e#
            (throw+ {:definite? true, :type :compacted, :description (.getMessage e#)}))
 
-         (catch StacklessClosedChannelException e#
-           (throw+ {:definite? false, :type :closed-netty-channel}))
+         ;(catch StacklessClosedChannelException e#
+         ;  (throw+ {:definite? false, :type :closed-netty-channel}))
 
          (catch StatusRuntimeException e#
            (throw+

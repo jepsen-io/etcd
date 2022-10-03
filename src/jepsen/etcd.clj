@@ -108,6 +108,7 @@
     (merge tests/noop-test
            opts
            {:name       (str "etcd " (name workload-name)
+                             " " (name (:client-type opts))
                              " " (str/join "," (map name (:nemesis opts)))
                             (when serializable " serializable"))
             :pure-generators true
@@ -154,6 +155,8 @@
     :validate [#{:etcdctl :jetcd} (cli/one-of #{:etcdctl :jetcd})]]
 
     [nil "--corrupt-check" "If set, enables etcd's experimental corruption checking options"]
+
+      [nil "--debug" "If set, enables additional (somewhat expensive) debug logging; for instance, txn-list-append will includethe intermediate transactions it executes as a part of each operation."]
 
    [nil "--lazyfs" "Mounts etcd in a lazyfs, and causes the kill nemesis to also wipe our unfsynced data files."]
 

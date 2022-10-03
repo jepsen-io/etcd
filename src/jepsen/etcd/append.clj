@@ -12,7 +12,8 @@
             [jepsen.tests.cycle.append :as append]
             [jepsen.etcd [client :as c]
                          [support :as s]]
-            [jepsen.etcd.client.txn :as t]
+            [jepsen.etcd.client [etcdctl :as etcdctl]
+                                [txn :as t]]
             [slingshot.slingshot :refer [try+]]))
 
 (defn preprocess
@@ -55,7 +56,6 @@
   "Takes a transaction with reads, and constructs a collection of guards
   verifying each read's revision is intact."
   [t]
-  (info :guards (select-keys t [:reads :read-revision]))
   (map (fn [k]
          (if-let [v (get (:reads t) k)]
            ; If the key existed, we go by its modification revision
@@ -116,6 +116,7 @@
   (setup! [_ test])
 
   (invoke! [_ test op]
+    ;(etcdctl/log conn (str "=================================================\nOp: " (pr-str op)))
     (c/with-errors op #{}
       (-> (preprocess conn op) read apply!)))
 

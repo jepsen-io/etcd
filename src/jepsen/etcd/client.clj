@@ -456,6 +456,15 @@
        vals
        first)))
 
+(defn txn-wrap-single-clause
+  "We can pass either single AST nodes (e.g. [:get ...]) or sequences of them
+  (e.g. [[:get k] [:put k v]]). This function normalizes these to sequences."
+  [clause]
+  (if (and (sequential? clause)
+           (keyword? (first clause)))
+    [clause]
+    clause))
+
 (defn txn!
   "Evaluates a transaction on the given client. Takes a predicate, a true
   branch, and a false branch, as Clojure structures. See
@@ -465,7 +474,10 @@
   ([c test t-branch]
    (txn! c test t-branch nil))
   ([c test t-branch f-branch]
-   (s/txn! c test t-branch f-branch)))
+   (s/txn! c
+           (txn-wrap-single-clause test)
+           (txn-wrap-single-clause t-branch)
+           (txn-wrap-single-clause f-branch))))
 
 (defn cas*!
   "Like cas!, but raw; returns full txn response map."
@@ -684,31 +696,33 @@
   "Turns a transaction AST into an appropriate Java datatype. For instance,
   [:put \"foo\" \"bar\"] becomes an Op$PutOp."
   [x]
+  ;(info :txn->java x)
   (cond (sequential? x)
         (let [[type & args] x]
           (case type
-            := (Cmp. (->bytes (first x)) Cmp$Op/EQUAL   (second x))
-            :< (Cmp. (->bytes (first x)) Cmp$Op/LESS    (second x))
-            :> (Cmp. (->bytes (first x)) Cmp$Op/GREATER (second x))
-            :mod-revision     (CmpTarget/modRevision (first x))
-            :create-revision  (CmpTarget/createRevision (first x))
-            :value            (CmpTarget/value (->bytes (first x)))
-            :version          (CmpTarget/version (first x))
-            :get              (Op/get (->bytes (first x)) GetOption/DEFAULT)
-            :put              (Op/put (->bytes (first x))
-                                      (->bytes (second x))
+            := (Cmp. (->bytes (first args)) Cmp$Op/EQUAL
+                     (txn->java (second args)))
+            :< (Cmp. (->bytes (first args)) Cmp$Op/LESS
+                     (txn->java (second args)))
+            :> (Cmp. (->bytes (first args)) Cmp$Op/GREATER
+                     (txn->java (second args)))
+            :mod-revision     (CmpTarget/modRevision (first args))
+            :create-revision  (CmpTarget/createRevision (first args))
+            :value            (CmpTarget/value (->bytes (first args)))
+            :version          (CmpTarget/version (first args))
+            :get              (Op/get (->bytes (first args)) GetOption/DEFAULT)
+            :put              (Op/put (->bytes (first args))
+                                      (->bytes (second args))
                                       put-option-with-prev-kv)))))
 
 (extend-protocol s/Client Client
   (txn! [c test t f]
-    (let [test (coll test)
-          t    (coll t)
-          f    (coll f)
-          res (-> (.. (kv-client c)
+    ; (info :test test :t t :f f)
+    (let [res (-> (.. (kv-client c)
                       (txn)
-                      (If   (into-array Cmp test))
-                      (Then (into-array Op  t))
-                      (Else (into-array Op  f))
+                      (If   (->> test (map txn->java) (into-array Cmp)))
+                      (Then (->> t    (map txn->java) (into-array Op)))
+                      (Else (->> f    (map txn->java) (into-array Op)))
                       (commit))
                   await
                   ->clj)
@@ -718,14 +732,14 @@
                          gets (:gets res)
                          puts (:puts res)]
                     (if ops
-                      (condp instance? (first ops)
-                        Op$PutOp (recur (conj! rs (first puts))
-                                        (next ops)
-                                        gets
-                                        (next puts))
-                        Op$GetOp (recur (conj! rs (first gets))
-                                        (next ops)
-                                        (next gets)
-                                        puts))
+                      (case (first (first ops))
+                        :put (recur (conj! rs (first puts))
+                                    (next ops)
+                                    gets
+                                    (next puts))
+                        :get (recur (conj! rs (first gets))
+                                    (next ops)
+                                    (next gets)
+                                    puts))
                       (persistent! rs)))]
       (assoc res :results results))))

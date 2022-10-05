@@ -94,6 +94,7 @@
       :workload     Name of the workload to run."
   [opts]
   (info "Test opts\n" (with-out-str (pprint opts)))
+  (s/check-thread-leaks)
   (let [serializable  (boolean (:serializable opts))
         workload-name (:workload opts)
         workload      ((workloads workload-name) opts)

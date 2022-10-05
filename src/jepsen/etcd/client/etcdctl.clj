@@ -25,13 +25,16 @@
   "etcdctl-logs")
 
 (defn etcdctl!
-  "Runs an etcdctl command over the given jepsen.control session, passing the
+  "Runs an etcdctl command using the given etcdctl client, passing the
   given stdin and returning parsed JSON."
-  [node session cmd in]
+  [client cmd in]
   (util/timeout
-    5000 (throw+ {:type :etcdctl-timeout,
+    5000 (throw+ {:type      :etcdctl-timeout,
                   :definite? false})
-    (try+ (let [res (c/with-session node session
+    (swap! (:active-threads client) conj (Thread/currentThread))
+    (try+ (let [res (c/with-session
+                      (:node client)
+                      (:session client)
                       (support/etcdctl!
                         [cmd
                          :-w :json
@@ -63,7 +66,9 @@
                       {:definite? false, :type :etcdtcl, :description error})))
 
                 ; Not JSON
-                (throw+ {:definite? false, :type :etcdctl, :description err})))))))
+                (throw+ {:definite? false, :type :etcdctl, :description err}))))
+          (finally
+            (swap! (:active-threads client) disj (Thread/currentThread))))))
 
 (defn parse-header
   "Interprets a header"
@@ -162,7 +167,7 @@
 (defprotocol Log
   (log [this msg]))
 
-(defrecord EtcdctlClient [number, ^Writer log, node, session]
+(defrecord EtcdctlClient [number, ^Writer log, node, active-threads, session]
   s/Client
   (txn!
     [this pred t-branch f-branch]
@@ -174,7 +179,7 @@
             _    (.write log "\n")
             _    (.write log text)
             ;_   (info :txn txn "\n" (txn->text txn))
-            raw-res (etcdctl! node session :txn text)
+            raw-res (etcdctl! this :txn text)
             _       (.write log (util/pprint-str raw-res))
             _       (.write log "\n")
             ;_    (info :raw-res (util/pprint-str raw-res))
@@ -200,16 +205,24 @@
 
   java.lang.AutoCloseable
   (close [this]
+    (info :closing this)
     (.flush log)
     (.close log)
-    (c/disconnect session)))
+    (c/disconnect session)
+    (loop []
+      (info :active-threads (count @active-threads))
+      (when (pos? (count @active-threads))
+        (Thread/sleep 1000)
+        (recur)))
+    (info :closed this)))
 
 (defn client
   "Constructs a client for the given test and node."
   [test node]
   (let [client-number (swap! client-number inc)]
-    (EtcdctlClient. client-number
-                    (io/writer (store/path! test log-dir
-                                            (str client-number ".log")))
-                    node
-                    (c/session node))))
+    (map->EtcdctlClient
+      {:number client-number
+       :log     (io/writer (store/path! test log-dir (str client-number ".log")))
+       :node   node
+       :active-threads (atom #{})
+       :session        (c/session node)})))

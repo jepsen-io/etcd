@@ -1,8 +1,11 @@
 (ns jepsen.etcd.support
   (:require [clojure.string :as str]
-            [jepsen [control :as c]]
+            [clojure.tools.logging :refer [info warn]]
+            [jepsen [control :as c]
+                    [util :as util]]
             [jepsen.control [core :as c.core]
-                            [net :as c.net]]))
+                            [net :as c.net]]
+            [slingshot.slingshot :refer [try+ throw+]]))
 
 (def dir "/opt/etcd")
 
@@ -50,3 +53,20 @@
           c/ssh*
           c.core/throw-on-nonzero-exit
           c/just-stdout))))
+
+(defn check-thread-leaks
+  "Tries to ensure that no threads have leaked over from the previous
+  incarnation of the test. We shouldn't have anyone waiting in SSH-related
+  code!"
+  []
+  (let [problems
+        (->> (Thread/getAllStackTraces)
+             (keep (fn [[thread stacktrace]]
+                     (let [classes (map #(.getClassName %) stacktrace)]
+                     (when (some (partial re-find #"net\.schmizz\.sshj")
+                                 classes)
+                       [thread classes])))))]
+    (when (seq problems)
+      (warn "Uh oh, bad threads!" (util/pprint-str problems))
+      (throw+ {:type :sshj-thread-leak
+               :threads problems}))))

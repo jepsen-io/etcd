@@ -1,5 +1,5 @@
 (ns jepsen.etcd.register
-  "Tests for single registers."
+  "Tests for single registers, using knossos for linearizability checking."
   (:require [clojure.tools.logging :refer [info warn]]
             [clojure.string :as str]
             [jepsen [checker :as checker]

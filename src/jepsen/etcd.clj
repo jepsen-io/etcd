@@ -24,7 +24,8 @@
                          [register :as register]
                          [set :as set]
                          [support :as s]
-                         [watch :as watch]]
+                         [watch :as watch]
+                         [wr :as wr]]
             [knossos.model :as model]
             [slingshot.slingshot :refer [try+]]))
 
@@ -39,7 +40,8 @@
    :none           (fn [_] tests/noop-test)
    :set            set/workload
    :register       register/workload
-   :watch          watch/workload})
+   :watch          watch/workload
+   :wr             wr/workload})
 
 (def all-workloads
   "A collection of workloads we run by default."
@@ -112,6 +114,7 @@
            {:name       (str "etcd " (name workload-name)
                              " " (name (:client-type opts))
                              " " (str/join "," (map name (:nemesis opts)))
+                            (when (:lazyfs opts) " lazyfs")
                             (when serializable " serializable"))
             :pure-generators true
             :serializable serializable
@@ -151,7 +154,7 @@
 
 (def cli-opts
   "Additional command line options."
-  [[nil "--client-type TYPE" "What kind of client should we use? Either jetcd or etcdctl."
+  [[nil "--client-type TYPE" "What kind of client should we use? Either jetcd or etcdctl. Etcdctl is an experiment and is definitely buggy--in particular, it has a habit of getting stuck while running commands and accidentally leaking operations into the *next* test run."
     :default :jetcd
     :parse-fn keyword
     :validate [#{:etcdctl :jetcd} (cli/one-of #{:etcdctl :jetcd})]]

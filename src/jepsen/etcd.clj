@@ -253,9 +253,14 @@
 
 ;; Repl stuff
 
+;; List-append investigation! This is to help track down an issue with
+;; list-append tests using the etcdctl client accidentally leaking state
+;; between test runs
+
 (defn txn-dirs
-  "Extracts a set of test directories from every transaction's reads in a test"
-  [test]
+  "Extracts a set of test directories from every transaction's reads in a
+  history"
+  [history]
   (let [xf (comp (keep :debug)
                  (map :read-res)
                  (mapcat :results)
@@ -263,7 +268,7 @@
                  (mapcat vals)
                  (map :value)
                  (map :dir))]
-    (into #{} xf (:history test))))
+    (into #{} xf history)))
 
 (defn all-txns-dirs
   "Maps test start times to their directories."
@@ -272,8 +277,19 @@
          [test (next (reverse (store/all-tests)))]
          (let [test @test
                _    (prn :checking (:start-time test))
-               dirs (txn-dirs test)]
+               dirs (txn-dirs (:history test))]
            (prn dirs)
            (if (seq dirs)
              (recur (assoc m (:start-time test) dirs))
              m))))
+
+(defn ops-involving
+  "Filters a history to just those ops involving the given key."
+  [k history]
+  (->> history
+       (filter (fn [op]
+                 (and (= :txn (:f op))
+                      (->> op
+                           :value
+                           (map second)
+                           (some #{k})))))))

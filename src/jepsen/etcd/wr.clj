@@ -49,7 +49,7 @@
                        (:results res))
             op' (if (:debug test)
                   (assoc op :debug
-                         {:txn-res res})
+                         {:txn-res (dissoc res :gets :puts)})
                   op)
             op' (if (:succeeded? res)
                   (assoc op' :type :ok, :value txn')
@@ -67,5 +67,7 @@
   (assoc (wr/test {:key-count         3
                    :max-txn-length    4
                    :consistency-models [:strict-serializable]
-                   :linearizable-keys? true})
+                   ; Expensive
+                   ;:linearizable-keys? true
+                   :wfr-keys         true})
          :client (TxnClient. nil)))

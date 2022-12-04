@@ -111,7 +111,8 @@
                          :interval  (:nemesis-interval opts)})]
     (merge tests/noop-test
            opts
-           {:name       (str "etcd " (name workload-name)
+           {:name       (str "etcd " (:version opts)
+                             " " (name workload-name)
                              " " (name (:client-type opts))
                              " " (str/join "," (map name (:nemesis opts)))
                             (when (:lazyfs opts) " lazyfs")

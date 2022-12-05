@@ -15,15 +15,34 @@
                                 [txn :as t]]
             [slingshot.slingshot :refer [try+]]))
 
+(defn encode-put
+  "Takes a test, an Op, and a value to write, and transforms the value: in
+  debug mode, adds extra debugging information."
+  [test op value]
+  (if (:debug test)
+    {:time    (str (util/local-time))
+     :dir     (.getName (store/path test))
+     :txn     (:value op)
+     :value   value}
+    value))
+
+(defn decode-get
+  "Takes a test and a value read for a key (which may be a bare value or a map
+  with debug information, and returns the bare value."
+  [test value]
+  (if (:debug test)
+    (:value value)
+    value))
+
 (defn etcd-txn
-  "We take an Elle transaction sequence like [[:w k v]] and convert it to a
-  series of etcd txn AST ops like [[:put k v]]."
-  [t]
+  "We take a test and an Op, and convert it to a series of etcd txn AST ops
+  like [[:put k v]]."
+  [test op]
   (mapv (fn [[f k v]]
           (case f
             :r (t/get k)
-            :w (t/put k v)))
-        t))
+            :w (t/put k (encode-put test op v))))
+        (:value op)))
 
 (defrecord TxnClient [conn]
   client/Client
@@ -39,12 +58,13 @@
 
     (c/with-errors op #{}
       (let [txn (:value op)
-            res (c/txn! conn (etcd-txn txn))
+            res (c/txn! conn (etcd-txn test op))
             ; Stitch reads back in to elle txn
             txn' (mapv (fn [[f k v :as mop] r]
                          (case f
                            :w mop
-                           :r [f k (-> r :kvs (get k) :value)]))
+                           :r (let [v (-> r :kvs (get k) :value)]
+                                [f k (decode-get test v)])))
                        txn
                        (:results res))
             op' (if (:debug test)

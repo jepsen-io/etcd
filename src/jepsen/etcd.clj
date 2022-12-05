@@ -9,6 +9,7 @@
                     [core :as jepsen]
                     [control :as c]
                     [generator :as gen]
+                    [history :as h]
                     [independent :as independent]
                     [store :as store]
                     [tests :as tests]
@@ -297,3 +298,49 @@
                            :value
                            (map second)
                            (some #{k})))))))
+
+(defn wr-op-revisions
+  "Takes a wr txn op and returns a sequence of maps from it like:
+
+    {:index         the op index
+     :key           a key
+     :value         the value of that key
+     :mod-revision  the mod revision of that key}
+
+  Helpful for finding duplicate mod revisions."
+  [op]
+  (->> op
+       :debug
+       :txn-res
+       :results
+       (keep (fn [r]
+               (if-let [[k p] (:prev-kv r)]
+                 ; write
+                 (when k
+                   {:type :w
+                    :index (:index op)
+                    :key k
+                    :value (:value (:value p))
+                    :mod-revision (:mod-revision p)})
+                 ; read
+                 (when-let [[k p] (first (:kvs r))]
+                   {:type :r
+                    :index (:index op)
+                    :key k
+                    :value (:value (:value p))
+                    :mod-revision (:mod-revision p)}))))))
+
+(defn wr-ops-revisions
+  "All revision maps from multile wr ops."
+  [ops]
+  (mapcat wr-op-revisions ops))
+
+(defn duplicate-revisions
+  "Takes operations and returns a map of [key value] to revision maps where
+  more than one revision exists for that key and value."
+  [ops]
+  (->> (wr-ops-revisions ops)
+       (group-by (juxt :key :value))
+       (filter (fn [[_ vs]]
+                 (< 1 (->> vs (map :mod-revision) set count))))
+       (into (sorted-map))))

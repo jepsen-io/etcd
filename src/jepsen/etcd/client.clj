@@ -64,6 +64,8 @@
            (io.grpc Status$Code
                     StatusRuntimeException)
            (io.grpc.stub StreamObserver)
+           ; Weirdly we *can't* catch this somehow: it yields an
+           ; IllegalAccessError.
            ;(io.netty.channel StacklessClosedChannelException)
            ))
 
@@ -287,6 +289,7 @@
          (catch CompactedException e#
            (throw+ {:definite? true, :type :compacted, :description (.getMessage e#)}))
 
+         ; Trying to catch this throws java.lang.IllegalAccessError ???!
          ;(catch StacklessClosedChannelException e#
          ;  (throw+ {:definite? false, :type :closed-netty-channel}))
 
@@ -645,7 +648,7 @@
   [client node]
   (-> client
       maintenance-client
-      (.statusMember (URI/create (etcd.support/peer-url node)))
+      (.statusMember (etcd.support/peer-url node))
       await
       ->clj))
 

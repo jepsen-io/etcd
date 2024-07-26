@@ -20,10 +20,11 @@
   debug mode, adds extra debugging information."
   [test op value]
   (if (:debug test)
-    {:time    (str (util/local-time))
-     :dir     (.getName (store/path test))
-     :txn     (:value op)
-     :value   value}
+    {:time          (str (util/local-time))
+     :invoke-index  (:index op)
+     :dir           (.getName (store/path test))
+     :txn           (:value op)
+     :value         value}
     value))
 
 (defn decode-get

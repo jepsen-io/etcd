@@ -192,6 +192,10 @@
     :parse-fn read-string
     :validate [#(and (number? %) (pos? %)) "Must be a positive number"]]
 
+   [nil "--retry-max-attempts COUNT" "Number of retry attempts we allow."
+    :default nil
+    :parse-fn parse-long]
+
    ["-s" "--serializable" "Use serializable reads, instead of going through consensus."]
 
    [nil "--snapshot-count COUNT" "Number of committed transactions to trigger a snapshot to disk. Passed to etcd."

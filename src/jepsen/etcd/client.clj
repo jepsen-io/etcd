@@ -213,15 +213,22 @@
   "Builds a client for the given node. If given a test map, chooses what kind
   of client to create based on (:client-type test)."
   ([node]
-   (.. (Client/builder)
-       (endpoints (into-array String [(etcd.support/client-url node)]))
-       ; (lazyInitialization false)
-       ; (loadBalancerPolicy "some string???")
-       (build)))
+   (client {:client-type :jetcd} node))
   ([test node]
    (case (:client-type test)
-     :jetcd   (client node)
-     :etcdctl (etcdctl/client test node))))
+     :jetcd
+     (let [b (Client/builder)
+           b (.endpoints b (into-array String [(etcd.support/client-url node)]))
+           b (if-let [r (:retry-max-attempts test)]
+               (.retryMaxAttempts b r)
+               b)
+           ; (lazyInitialization false)
+           ; (loadBalancerPolicy "some string???")
+           ]
+       (.build b))
+
+     :etcdctl
+     (etcdctl/client test node))))
 
 (defrecord EtcdCtl []
   )

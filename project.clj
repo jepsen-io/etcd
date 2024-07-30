@@ -22,7 +22,7 @@
                  ]
   :jvm-opts ["-Djava.awt.headless=true"
              "-server"
-             "-Xmx24g"]
+             "-Xmx72g"]
   :repl-options {:init-ns jepsen.etcd}
   :main jepsen.etcd
   :profiles {:uberjar {:target-path "target/uberjar"

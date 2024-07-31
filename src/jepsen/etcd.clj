@@ -116,7 +116,7 @@
                              " " (name workload-name)
                              " " (name (:client-type opts))
                              " " (str/join "," (map name (:nemesis opts)))
-                            (when (< (:retry-max-attempts opts) 1)
+                            (when (< (or (:retry-max-attempts opts) 2) 1)
                               " no-retry")
                             (when (:lazyfs opts) " lazyfs")
                             (when serializable " serializable"))

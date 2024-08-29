@@ -246,8 +246,8 @@
   client."
   [[client-sym node] & body]
   `(let [~client-sym (client ~node)]
-    (try ~@body
-         (finally (close! ~client-sym)))))
+     (try ~@body
+          (finally (close! ~client-sym)))))
 
 ; Futures
 (defn await

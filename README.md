@@ -21,7 +21,7 @@ lein run test-all --concurrency 2n --nemesis kill,partition
 You can also run particular workloads and nemeses with `lein run test`. For instance, to demonstrate lost updates to a set protected by an etcd lock, try:
 
 ```sh
-lein run test --workload lock-set --nemesis pause --time-limit 120
+lein run test --workload lock-set --nemesis pause --time-limit 120 -v 3.5.14
 ```
 
 ## Workloads

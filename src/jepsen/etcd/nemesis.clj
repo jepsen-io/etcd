@@ -128,6 +128,7 @@
   "A combined nemesis package for administrative operations."
   [opts]
   (when (contains? (:faults opts) :admin)
+    (prn :admin)
     {:nemesis         (AdminNemesis. nil)
      :generator       (admin-generator opts)
      :final-generator (admin-final-generator)
@@ -186,16 +187,23 @@
 (defn corrupt-package
   "A nemesis package for datafile corruption"
   [opts]
-  {:nemesis   (n/compose
-                {{:bitflip-wal :bitflip
-                  :bitflip-snap :bitflip}  (n/bitflip)
-                 {:truncate-wal :truncate} (n/truncate-file)})
-   :generator (->> (corrupt-generator opts)
-                   (gen/stagger (:interval opts)))
-   :perf      #{{:name "corrupt"
-                 :fs   #{:bitflip-wal :bitflip-snap
-                         :truncate-wal :truncate-snap}
-                 :color "#99F2E2"}}})
+  (when (some (:faults opts) [:bitflip
+                              :bitflip-snap
+                              :bitflip-wal
+                              :truncate
+                              :truncate-snap
+                              :truncate-wal])
+    (prn :corrupt)
+    {:nemesis   (n/compose
+                  {{:bitflip-wal :bitflip
+                    :bitflip-snap :bitflip}  (n/bitflip)
+                   {:truncate-wal :truncate} (n/truncate-file)})
+     :generator (->> (corrupt-generator opts)
+                     (gen/stagger (:interval opts)))
+     :perf      #{{:name "corrupt"
+                   :fs   #{:bitflip-wal :bitflip-snap
+                           :truncate-wal :truncate-snap}
+                   :color "#99F2E2"}}}))
 
 (defn nemesis-package
   "Constructs a nemesis and generators for etcd."

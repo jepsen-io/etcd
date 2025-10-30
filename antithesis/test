@@ -1,0 +1,10 @@
+#!/bin/bash
+
+set -e
+source ./env
+
+cd "$ANTITHESIS_DIR/config"
+sudo docker kill n1 n2 n3 || true
+sudo docker rm n1 n2 n3 || true
+sudo rm -rf volumes
+sudo docker-compose run control

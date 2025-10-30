@@ -12,7 +12,7 @@
 (defn node-url
   "An HTTP url for connecting to a node on a particular port."
   [node port]
-  (str "http://" (c.net/ip node) ":" port))
+  (str "http://" node ":" port))
 
 (defn peer-url
   "The HTTP url for other peers to talk to a node."

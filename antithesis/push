@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+
+# Tags images and pushes them to Antithesis' repo
+
+set -e
+source ./env
+
+PREFIX="us-central1-docker.pkg.dev/molten-verve-216720/$ANTITHESIS_TENANT-repository"
+
+cd "$ANTITHESIS_DIR"
+echo $(pwd)
+cat gar.key.json | sudo docker login -u _json_key https://us-central1-docker.pkg.dev --password-stdin
+
+sudo docker tag "jepsen-$DB_NAME-control" "$PREFIX/jepsen-$DB_NAME-control"
+sudo docker tag "jepsen-$DB_NAME-db" "$PREFIX/jepsen-$DB_NAME-db"
+sudo docker tag "jepsen-$DB_NAME-config" "$PREFIX/jepsen-$DB_NAME-config"
+
+sudo docker push "$PREFIX/jepsen-$DB_NAME-control"
+sudo docker push "$PREFIX/jepsen-$DB_NAME-db"
+sudo docker push "$PREFIX/jepsen-$DB_NAME-config"

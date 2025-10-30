@@ -178,7 +178,7 @@
     (c/close! conn)))
 
 (defn workload
-  "A generator, client, and checker for a set test."
+  "A generator, client, and checker for a list-append test."
   [opts]
   (assoc (append/test {:key-count         3
                        :max-txn-length    4

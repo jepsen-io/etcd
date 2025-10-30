@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+
+set -e
+source ./env
+
+curl --fail -u "${ANTITHESIS_USER}:${ANTITHESIS_PASSWORD}" \
+-X POST "https://$ANTITHESIS_TENANT.antithesis.com/api/v1/launch/$ANTITHESIS_ENDPOINT" \
+-d "{\"params\": { \"antithesis_description\": \"Jepsen $DB_NAME test\",
+     \"antithesis.duration\": \"15\",
+     \"antithesis.config_image\": \"jepsen-$DB_NAME-config:latest\",
+     \"antithesis.images\": \"jepsen-$DB_NAME-control:latest;jepsen-$DB_NAME-db:latest\",
+     \"antithesis.description\": \"no thoughts, just vibes\",
+     \"antithesis.report.recipients\": \"aphyr@jepsen.io\"
+   }}"
+echo
+echo "Started at $(date). This will take about 30 minutes."

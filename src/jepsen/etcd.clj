@@ -1,9 +1,11 @@
 (ns jepsen.etcd
+  (:gen-class)
   (:require [clojure.tools.logging :refer [info warn]]
             [clojure.string :as str]
             [clojure.pprint :refer [pprint]]
             [dom-top.core :refer [loopr]]
-            [jepsen [checker :as checker]
+            [jepsen [antithesis :as antithesis]
+                    [checker :as checker]
                     [cli :as cli]
                     [client :as client]
                     [core :as jepsen]
@@ -11,6 +13,7 @@
                     [generator :as gen]
                     [history :as h]
                     [independent :as independent]
+                    [nemesis]
                     [store :as store]
                     [tests :as tests]
                     [util :as util :refer [map-vals]]]
@@ -91,12 +94,10 @@
   "Given an options map from the command line runner (e.g. :nodes, :ssh,
   :concurrency ...), constructs a test map. Special options:
 
-      :quorum       Whether to use quorum reads
       :rate         Approximate number of requests per second
       :ops-per-key  Maximum number of operations allowed on any given key.
       :workload     Name of the workload to run."
   [opts]
-  (info "Test opts\n" (with-out-str (pprint opts)))
   (s/check-thread-leaks)
   (let [serializable  (boolean (:serializable opts))
         workload-name (:workload opts)
@@ -110,62 +111,68 @@
                          :pause     {:targets [:primaries :all]}
                          :kill      {:targets [:primaries :all]}
                          :interval  (:nemesis-interval opts)})]
-    (merge tests/noop-test
-           opts
-           {:name       (str "etcd " (:version opts)
-                             " " (name workload-name)
-                             " " (name (:client-type opts))
-                             " " (str/join "," (map name (:nemesis opts)))
+    (info :antithesis? (:antithesis? opts))
+    (-> tests/noop-test
+        (merge opts
+          {:name       (str "etcd " (:version opts)
+                            " " (name workload-name)
+                            " " (name (:client-type opts))
+                            " " (str/join "," (map name (:nemesis opts)))
                             (when (< (or (:retry-max-attempts opts) 2) 1)
                               " no-retry")
                             (when (:lazyfs opts) " lazyfs")
                             (when serializable " serializable"))
-            :pure-generators true
-            :serializable serializable
-            :initialized? (atom false)
-            :members    (atom (into (sorted-set) (:nodes opts)))
-            :os         debian/os
-            :db         db
-            :nemesis    (:nemesis nemesis)
-            :checker
-            (checker/compose
-              {:perf        (checker/perf {:nemeses (:perf nemesis)})
-               :clock       (checker/clock-plot)
-               :stats       (checker/stats)
-               :exceptions  (checker/unhandled-exceptions)
-               :crash       (checker/log-file-pattern
-                              ; Ignore matches like "couldn't find local name
-                              ; "n1" in initial cluster; we get these when we
-                              ; restart nodes that don't belong in the group
-                              ; due to membership changes.
-                              #"(\"level\":\"fatal|panic\"(?!.*couldn't find local name))|(panic:)|(^signal SIG)"
-                              "etcd.log")
-               :workload    (:checker workload)})
-            :client    (:client workload)
-            :generator (gen/phases
-                         (->> (:generator workload)
-                              (gen/stagger (/ (:rate opts)))
-                              (gen/nemesis
-                                (gen/phases
-                                  (gen/sleep 5)
-                                  (:generator nemesis)))
-                              (gen/time-limit (:time-limit opts)))
-                         (gen/log "Healing cluster")
-                         (gen/nemesis (:final-generator nemesis))
-                         (gen/log "Waiting for recovery")
-                         (gen/sleep 10)
-                         (gen/clients (:final-generator workload)))})))
+           :pure-generators true
+           :serializable serializable
+           :initialized? (atom false)
+           :members    (atom (into (sorted-set) (:nodes opts)))
+           :os         debian/os
+           :db         db
+           :nemesis    (:nemesis nemesis)
+           :checker
+           (checker/compose
+             {:perf        (checker/perf {:nemeses (:perf nemesis)})
+              :clock       (checker/clock-plot)
+              :stats       (checker/stats)
+              :exceptions  (checker/unhandled-exceptions)
+              :crash       (checker/log-file-pattern
+                             ; Ignore matches like "couldn't find local name
+                             ; "n1" in initial cluster; we get these when we
+                             ; restart nodes that don't belong in the group
+                             ; due to membership changes.
+                             #"(\"level\":\"fatal|panic\"(?!.*couldn't find local name))|(panic:)|(^signal SIG)"
+                             "etcd.log")
+              :workload    (:checker workload)})
+           :client    (:client workload)
+           :generator (gen/phases
+                        (->> (:generator workload)
+                             (gen/stagger (/ (:rate opts)))
+                             (gen/nemesis
+                               (gen/phases
+                                 (gen/sleep 5)
+                                 (:generator nemesis)))
+                             (gen/time-limit (:time-limit opts)))
+                        (gen/log "Healing cluster")
+                        (gen/nemesis (:final-generator nemesis))
+                        (gen/log "Waiting for recovery")
+                        (gen/sleep 10)
+                        (gen/clients (:final-generator workload)))})
+        (cond-> (:antithesis? opts) (assoc :nemesis jepsen.nemesis/noop))
+        antithesis/test)))
 
 (def cli-opts
   "Additional command line options."
-  [[nil "--client-type TYPE" "What kind of client should we use? Either jetcd or etcdctl. Etcdctl is an experiment and is definitely buggy--in particular, it has a habit of getting stuck while running commands and accidentally leaking operations into the *next* test run."
+  [["-a" "--antithesis" "If set, runs in Antithesis mode. Disables the OS and DB, and SSH, expecting these to be provided by the Antithesis environment."
+    :id :antithesis?]
+
+   [nil "--client-type TYPE" "What kind of client should we use? Either jetcd or etcdctl. Etcdctl is an experiment and is definitely buggy--in particular, it has a habit of getting stuck while running commands and accidentally leaking operations into the *next* test run."
     :default :jetcd
     :parse-fn keyword
     :validate [#{:etcdctl :jetcd} (cli/one-of #{:etcdctl :jetcd})]]
 
     [nil "--corrupt-check" "If set, enables etcd's experimental corruption checking options"]
 
-      [nil "--debug" "If set, enables additional (somewhat expensive) debug logging; for instance, txn-list-append will includethe intermediate transactions it executes as a part of each operation."]
+    [nil "--debug" "If set, enables additional (somewhat expensive) debug logging; for instance, txn-list-append will includethe intermediate transactions it executes as a part of each operation."]
 
    [nil "--lazyfs" "Mounts etcd in a lazyfs, and causes the kill nemesis to also wipe our unfsynced data files."]
 
@@ -253,14 +260,15 @@
   "Handles command line arguments. Can either run a test, or a web server for
   browsing results."
   [& args]
-  (cli/run! (merge (cli/single-test-cmd {:test-fn  etcd-test
-                                         :opt-spec (into cli-opts
-                                                         test-cli-opts)})
-                   (cli/test-all-cmd {:tests-fn (partial all-tests etcd-test)
-                                      :opt-spec (into cli-opts
-                                                      test-all-cli-opts)})
-                   (cli/serve-cmd))
-            args))
+  (antithesis/with-rng
+    (cli/run! (merge (cli/single-test-cmd {:test-fn  etcd-test
+                                           :opt-spec (into cli-opts
+                                                           test-cli-opts)})
+                     (cli/test-all-cmd {:tests-fn (partial all-tests etcd-test)
+                                        :opt-spec (into cli-opts
+                                                        test-all-cli-opts)})
+                     (cli/serve-cmd))
+              args)))
 
 ;; Repl stuff
 

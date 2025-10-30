@@ -1,0 +1,11 @@
+#!/bin/bash
+
+# This directory, and the Clojure project dir that contains it
+temp=$( realpath "$0" )
+export ANTITHESIS_DIR=$( dirname "$temp" )
+export PROJECT_DIR=$( dirname "$ANTITHESIS_DIR" )
+
+# What do we call this DB?
+export DB_NAME="etcd"
+
+source "$ANTITHESIS_DIR/antithesis-env"

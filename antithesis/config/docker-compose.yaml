@@ -1,0 +1,92 @@
+version: '3.0'
+# I have no idea what I'm doing
+networks:
+  antithesis-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.0.0.10/24
+services:
+  control:
+    container_name: control
+    hostname: control
+    image: jepsen-etcd-control:latest
+    init: true
+    networks:
+      antithesis-net:
+        ipv4_address: 10.0.0.100
+    volumes:
+      - ./volumes/store:/opt/jepsen-test/store
+    depends_on:
+      n1:
+        condition: service_started
+      n2:
+        condition: service_started
+      n3:
+        condition: service_started
+  n1:
+    container_name: n1
+    hostname: n1
+    image: jepsen-etcd-db:latest
+    environment:
+      ETCD_NAME: "n1"
+      ETCD_INITIAL_ADVERTISE_PEER_URLS: "http://n1:2380"
+      ETCD_LISTEN_PEER_URLS: "http://0.0.0.0:2380"
+      ETCD_LISTEN_CLIENT_URLS: "http://0.0.0.0:2379"
+      ETCD_ADVERTISE_CLIENT_URLS: "http://n1.etcd:2379"
+      ETCD_INITIAL_CLUSTER_TOKEN: "jepsen"
+      ETCD_INITIAL_CLUSTER: "n1=http://n1:2380,n2=http://n2:2380,n3=http://n3:2380"
+      ETCD_INITIAL_CLUSTER_STATE: "new"
+      ALLOW_NONE_AUTHENTICATION: "yes"
+    #healthcheck:
+    #  test: ["CMD-SHELL", "netstat -ltnp | grep 2379"]
+    #  interval: 5s
+    #  timeout: 10s
+    init: true
+    networks:
+      antithesis-net:
+        ipv4_address: 10.0.0.11
+  n2:
+    container_name: n2
+    hostname: n2
+    image: jepsen-etcd-db:latest
+    environment:
+      ETCD_NAME: "n2"
+      ETCD_INITIAL_ADVERTISE_PEER_URLS: "http://n2:2380"
+      ETCD_LISTEN_PEER_URLS: "http://0.0.0.0:2380"
+      ETCD_LISTEN_CLIENT_URLS: "http://0.0.0.0:2379"
+      ETCD_ADVERTISE_CLIENT_URLS: "http://n2.etcd:2379"
+      ETCD_INITIAL_CLUSTER_TOKEN: "jepsen"
+      ETCD_INITIAL_CLUSTER: "n1=http://n1:2380,n2=http://n2:2380,n3=http://n3:2380"
+      ETCD_INITIAL_CLUSTER_STATE: "new"
+      ALLOW_NONE_AUTHENTICATION: "yes"
+    #healthcheck:
+    #  test: ["CMD-SHELL", "netstat -ltnp | grep 2379"]
+    #  interval: 5s
+    #  timeout: 10s
+    init: true
+    networks:
+      antithesis-net:
+        ipv4_address: 10.0.0.12
+  n3:
+    container_name: n3
+    hostname: n3
+    image: jepsen-etcd-db:latest
+    environment:
+      ETCD_NAME: "n3"
+      ETCD_INITIAL_ADVERTISE_PEER_URLS: "http://n3:2380"
+      ETCD_LISTEN_PEER_URLS: "http://0.0.0.0:2380"
+      ETCD_LISTEN_CLIENT_URLS: "http://0.0.0.0:2379"
+      ETCD_ADVERTISE_CLIENT_URLS: "http://n3.etcd:2379"
+      ETCD_INITIAL_CLUSTER_TOKEN: "jepsen"
+      ETCD_INITIAL_CLUSTER: "n1=http://n1:2380,n2=http://n2:2380,n3=http://n3:2380"
+      ETCD_INITIAL_CLUSTER_STATE: "new"
+      ALLOW_NONE_AUTHENTICATION: "yes"
+    #healthcheck:
+    #  test: ["CMD-SHELL", "netstat -ltnp | grep 2379"]
+    #  interval: 5s
+    #  timeout: 10s
+    init: true
+    networks:
+      antithesis-net:
+        ipv4_address: 10.0.0.13

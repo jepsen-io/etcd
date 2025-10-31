@@ -23,7 +23,7 @@
     (let [[k [version value]] (:value op)]
       (c/with-errors op #{:read}
         (case (:f op)
-          :read (let [r (c/get conn k {:serializable? (:serializable test)})
+          :read (let [r (c/get conn k test)
                       v [(:version r) (:value r)]]
                   (assoc op :type :ok, :value (independent/tuple k v)))
 

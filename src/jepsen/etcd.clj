@@ -99,7 +99,7 @@
       :workload     Name of the workload to run."
   [opts]
   (s/check-thread-leaks)
-  (let [serializable  (boolean (:serializable opts))
+  (let [serializable? (boolean (:serializable? opts))
         workload-name (:workload opts)
         workload      ((workloads workload-name) opts)
         db            (db/db opts)
@@ -121,9 +121,9 @@
                             (when (< (or (:retry-max-attempts opts) 2) 1)
                               " no-retry")
                             (when (:lazyfs opts) " lazyfs")
-                            (when serializable " serializable"))
+                            (when serializable? " serializable"))
            :pure-generators true
-           :serializable serializable
+           :serializable? serializable?
            :initialized? (atom false)
            :members    (atom (into (sorted-set) (:nodes opts)))
            :os         debian/os
@@ -205,7 +205,8 @@
     :default nil
     :parse-fn parse-long]
 
-   ["-s" "--serializable" "Use serializable reads, instead of going through consensus."]
+   ["-s" "--serializable" "Use serializable reads, instead of going through consensus."
+    :id :serializable?]
 
    [nil "--snapshot-count COUNT" "Number of committed transactions to trigger a snapshot to disk. Passed to etcd."
     :default 100

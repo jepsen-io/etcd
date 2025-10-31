@@ -24,6 +24,12 @@ You can also run particular workloads and nemeses with `lein run test`. For inst
 lein run test --workload lock-set --nemesis pause --time-limit 120
 ```
 
+Or to show stale reads violate linearizability:
+
+```sh
+lein run test --time-limit 30 -s --nemesis partition --workload register --concurrency 2n
+```
+
 ## Workloads
 
 `append` appends values to keys and reads them back, using transactions to

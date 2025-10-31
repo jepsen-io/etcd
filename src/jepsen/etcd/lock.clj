@@ -193,7 +193,7 @@
     (case (:f op)
       :read
       (c/with-errors op #{:read}
-        (let [v (:value (c/get conn k {:serializable? (:serializable test)}))]
+        (let [v (:value (c/get conn k test))]
           (assoc op :type :ok :value v)))
 
       :add

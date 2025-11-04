@@ -9,7 +9,9 @@ ENTRYPOINT java -Djava.awt.headless=true -Xmx8g \
   -jar /opt/jepsen-test/jepsen-test.jar \
   test \
   --antithesis \
-  --time-limit 120 \
   --nodes n1,n2,n3 \
+  --workload append \
   --concurrency 2n \
+  --nemesis partition \
+  --time-limit 60 \
   --serializable

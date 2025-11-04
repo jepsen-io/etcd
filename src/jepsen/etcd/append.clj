@@ -24,12 +24,14 @@
     :test
     :client
     :op
-    :txn"
+    :txn
+    :read-only?  For read-only transactions, we can skip the write phase."
   [test client op]
-  {:test    test
-   :client  client
-   :op      op
-   :txn     (:value op)})
+  {:test       test
+   :client     client
+   :op         op
+   :txn        (:value op)
+   :read-only? (every? (comp #{:r} first) (:value op))})
 
 (defn encode-put
   "Takes a transaction map and a value to write, and transforms the value
@@ -118,16 +120,17 @@
                 []])
        second))
 
-(defn apply!
+(defn apply-rw!
   "Takes a transaction map and applies reads and writes, rewriting :txn to
   include the results of reads. Returns a completed operation, including extra
   debug information under a :debug key:
 
-  :reads          The read map
-  :read-revision  The revision we read at
-  :read-res       The result of the read phase
-  :write-txn      The write txn we executed, as a vector of [guards true-branch]
-  :write-res      The result of the write txn
+    :reads          The read map
+    :read-revision  The revision we read at
+    :read-res       The result of the read phase
+    :write-txn      The write txn we executed, as a vector of
+                    [guards true-branch]
+    :write-res      The result of the write txn
   "
   [t]
   (let [reads   (:reads t)
@@ -157,6 +160,48 @@
       (assoc op :type :ok, :value txn')
       (assoc op :type :fail, :error :didn't-succeed))))
 
+(defn apply-ro!
+  "Takes a transaction map for a read only transaction, and returns the
+  completed operation, with extra information under a :debug key:
+
+    :reads          The read map
+    :read-revision  The revision we read at
+    :read-res       The result of the read phase"
+  [{:keys [txn client op test] :as t}]
+  (let [; Read every key
+        res (->> txn
+                 (map second)
+                 distinct
+                 (map t/get)
+                 (c/txn! client))
+        reads (->> (:results res)
+                   (map :kvs)
+                   (reduce merge))
+        ; Rewrite txn
+        txn' (mapv (fn [[f k v :as mop]]
+                     (case f
+                       :r [f k (decode-get t (:value (reads k)))]
+                       :append mop))
+                   txn)
+        op (if (:debug test)
+             (assoc op :debug
+                    {:reads reads
+                     :read-res res
+                     :read-revision (:revision (:header res))})
+             op)]
+    (if (:succeeded? res)
+      (assoc op :type :ok, :value txn')
+      (assoc op :type :fail, :error :didn't-succeed))))
+
+(defn apply-singleton-ro!
+  "Takes a transaction map for a read-only transaction with a single operation,
+  and returns the completed operation."
+  [{:keys [txn client op test] :as t}]
+  (let [[f k _ :as mop] (first txn)
+        r               (c/get client k test)
+        txn'            [[f k (decode-get t (:value r))]]]
+    (assoc op :type :ok, :value txn')))
+
 (defrecord TxnClient [conn]
   client/Client
   (open! [this test node]
@@ -170,7 +215,12 @@
       (etcdctl/log conn (str "=================================================\nOp: " (pr-str op))))
 
     (c/with-errors op #{}
-      (-> (preprocess test conn op) read apply!)))
+      (let [t (preprocess test conn op)]
+        (if (:read-only? t)
+          (if (= 1 (count (:txn t)))
+            (apply-singleton-ro! t)
+            (apply-ro! t))
+          (-> t read apply-rw!)))))
 
   (teardown! [_ test])
 

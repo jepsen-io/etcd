@@ -4,11 +4,18 @@ RUN apk add git gnuplot graphviz grep
 # Install test
 WORKDIR /opt/jepsen-test
 COPY jepsen-test.jar /opt/jepsen-test/jepsen-test.jar
+# Antithesis instrumentation
+RUN mkdir -p /opt/antithesis/catalog
+# Instrumenting the JVM seems to cause some sort of JVM class/interface error
+# in the pretty printer
+#RUN ln -s /opt/jepsen-test /opt/antithesis/catalog
 # Go
 ENTRYPOINT java -Djava.awt.headless=true -Xmx8g \
-  -jar /opt/jepsen-test/jepsen-test.jar \
+  -ea \
+  -cp '/opt/jepsen-test/*' \
+  jepsen.etcd \
+  #-jar /opt/jepsen-test/jepsen-test.jar \
   test \
-  --antithesis \
   --nodes n1,n2,n3 \
   --workload append \
   --concurrency 2n \

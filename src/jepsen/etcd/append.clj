@@ -4,7 +4,8 @@
   transaction to perform all writes (and reads)."
   (:refer-clojure :exclude [read])
   (:require [clojure.tools.logging :refer [info warn]]
-            [jepsen [client :as client]
+            [jepsen [antithesis :as antithesis]
+                    [client :as client]
                     [checker :as checker]
                     [generator :as gen]
                     [store :as store]
@@ -227,10 +228,33 @@
   (close! [_ test]
     (c/close! conn)))
 
+(defrecord Checker [checker]
+  antithesis/Checker ; Let Antithesis know we're doing our own assertions
+  checker/Checker
+  (check [this test history opts]
+    (let [r (checker/check checker test history opts)]
+      ; We'll allow :unknown here
+      (antithesis/assert-always (not (false? (:valid? r)))
+                                "elle valid or unknown"
+                                r)
+      ; And we want at least some passing
+      (antithesis/assert-sometimes (true? (:valid? r))
+                                   "elle valid"
+                                   r)
+      r)))
+
+(defn checker
+  "Lifts the Elle list-append checker into an Antithesis-aware wrapper which
+  doesn't throw for cycle-search-timeout and empty-transaction-graph
+  conditions."
+  [checker]
+  (Checker. checker))
+
 (defn workload
   "A generator, client, and checker for a list-append test."
   [opts]
-  (assoc (append/test {:key-count         3
-                       :max-txn-length    4
-                       :consistency-models [:strict-serializable]})
-         :client (TxnClient. nil)))
+  (-> (append/test {:key-count         3
+                    :max-txn-length    4
+                    :consistency-models [:strict-serializable]})
+      (assoc :client (TxnClient. nil))
+      (update :checker checker)))

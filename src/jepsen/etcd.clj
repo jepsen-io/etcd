@@ -110,8 +110,31 @@
                          :partition {:targets [:primaries :majority :majorities-ring]}
                          :pause     {:targets [:primaries :all]}
                          :kill      {:targets [:primaries :all]}
-                         :interval  (:nemesis-interval opts)})]
-    (info :antithesis? (:antithesis? opts))
+                         :interval  (:nemesis-interval opts)})
+        gen (->> (:generator workload)
+                 (gen/stagger (/ (:rate opts)))
+                 (gen/nemesis
+                   (gen/phases
+                     (gen/sleep 5)
+                     (:generator nemesis))))
+        gen (if (antithesis/antithesis?)
+              ; In Antithesis, we let Antithesis end the generator randomly at
+              ; any point, and immediately proceed to the final gen.
+              (gen/phases
+                (antithesis/early-termination-generator
+                  {:interval    10
+                   :probability 0.1}
+                  gen)
+                (gen/clients (:final-generator workload)))
+              ; In normal Jepsen, we use a time limit, then heal the cluster
+              ; and wait for recovery before final gen.
+              (gen/phases
+                (gen/time-limit (:time-limit opts) gen)
+                (gen/log "Healing cluster")
+                (gen/nemesis (:final-generator nemesis))
+                (gen/log "Waiting for recovery")
+                (gen/sleep 10)
+                (gen/clients (:final-generator workload))))]
     (-> tests/noop-test
         (merge opts
           {:name       (str "etcd " (:version opts)
@@ -123,12 +146,13 @@
                             (when (:lazyfs opts) " lazyfs")
                             (when serializable? " serializable"))
            :pure-generators true
-           :serializable? serializable?
            :initialized? (atom false)
            :members    (atom (into (sorted-set) (:nodes opts)))
            :os         debian/os
            :db         db
-           :nemesis    (:nemesis nemesis)
+           :nemesis    (if (antithesis/antithesis?)
+                         jepsen.nemesis/noop
+                         (:nemesis nemesis))
            :checker
            (checker/compose
              {:perf        (checker/perf {:nemeses (:perf nemesis)})
@@ -142,30 +166,14 @@
                              ; due to membership changes.
                              #"(\"level\":\"fatal|panic\"(?!.*couldn't find local name))|(panic:)|(^signal SIG)"
                              "etcd.log")
-              :workload    (:checker workload)})
-           :client    (:client workload)
-           :generator (gen/phases
-                        (->> (:generator workload)
-                             (gen/stagger (/ (:rate opts)))
-                             (gen/nemesis
-                               (gen/phases
-                                 (gen/sleep 5)
-                                 (:generator nemesis)))
-                             (gen/time-limit (:time-limit opts)))
-                        (gen/log "Healing cluster")
-                        (gen/nemesis (:final-generator nemesis))
-                        (gen/log "Waiting for recovery")
-                        (gen/sleep 10)
-                        (gen/clients (:final-generator workload)))})
-        (cond-> (:antithesis? opts) (assoc :nemesis jepsen.nemesis/noop))
+              :workload    (antithesis/checker+ (:checker workload))})
+           :client (antithesis/client (:client workload))
+           :generator gen})
         antithesis/test)))
 
 (def cli-opts
   "Additional command line options."
-  [["-a" "--antithesis" "If set, runs in Antithesis mode. Disables the OS and DB, and SSH, expecting these to be provided by the Antithesis environment."
-    :id :antithesis?]
-
-   [nil "--client-type TYPE" "What kind of client should we use? Either jetcd or etcdctl. Etcdctl is an experiment and is definitely buggy--in particular, it has a habit of getting stuck while running commands and accidentally leaking operations into the *next* test run."
+  [[nil "--client-type TYPE" "What kind of client should we use? Either jetcd or etcdctl. Etcdctl is an experiment and is definitely buggy--in particular, it has a habit of getting stuck while running commands and accidentally leaking operations into the *next* test run."
     :default :jetcd
     :parse-fn keyword
     :validate [#{:etcdctl :jetcd} (cli/one-of #{:etcdctl :jetcd})]]

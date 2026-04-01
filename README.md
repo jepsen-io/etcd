@@ -18,10 +18,10 @@ lein run test-all --concurrency 2n --workload append
 lein run test-all --concurrency 2n --nemesis kill,partition
 ```
 
-You can also run particular workloads and nemeses with `lein run test`. For instance, to demonstrate lost updates to a set protected by an etcd lock, try:
+You can also run particular workloads and nemeses with `lein run test`. For instance:
 
 ```sh
-lein run test --workload lock-set --nemesis pause --time-limit 120
+lein run test --workload set --nemesis pause --time-limit 120
 ```
 
 Or to show stale reads violate linearizability:
@@ -33,7 +33,7 @@ lein run test --time-limit 30 -s --nemesis partition --workload register --concu
 If you want to save `history.edn`/`history.txt` without running the checker yet:
 
 ```sh
-lein run test --workload lock-set --nemesis pause --history-only
+lein run test --workload set --nemesis pause --history-only
 ```
 
 ## Workloads
@@ -43,11 +43,6 @@ perform multiple reads/appends atomically. Each append is implemented by
 reading the current value of the key from etcd, and writing it back using a
 compare guard on the observed revision, to ensure nobody has changed it during
 the transaction.
-
-`lock-set` uses an etcd lock to protect access to a shared in-memory set stored
-on the local control node, inside Jepsen itself. `lock-etcd-set` does the same,
-but stores the set in etcd. Both of these are unsafe, because etcd locks are
-fundamentally unsafe.
 
 `set` appends unique elements to a single key using compare-and-set transactions, and tries to read the set back.
 

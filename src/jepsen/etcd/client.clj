@@ -21,12 +21,14 @@
                            Cluster
                            KeyValue
                            KV
+                           Lease
+                           Lock
                            Maintenance
                            Response
                            Response$Header
                            Watch
-                          Watch$Listener
-                          Watch$Watcher)
+                           Watch$Listener
+                           Watch$Watcher)
            (io.etcd.jetcd.common.exception ClosedClientException
                                            CompactedException
                                            EtcdException)
@@ -34,10 +36,15 @@
                                   MemberAddResponse
                                   MemberListResponse
                                   MemberRemoveResponse)
-           (io.etcd.jetcd.kv CompactResponse
-                             GetResponse
-                             PutResponse
-                             TxnResponse)
+            (io.etcd.jetcd.kv CompactResponse
+                              GetResponse
+                              PutResponse
+                              TxnResponse)
+            (io.etcd.jetcd.lease LeaseGrantResponse
+                                 LeaseKeepAliveResponse
+                                 LeaseRevokeResponse)
+            (io.etcd.jetcd.lock LockResponse
+                                UnlockResponse)
             (io.etcd.jetcd.maintenance StatusResponse)
            (io.etcd.jetcd.op Cmp
                              Cmp$Op
@@ -54,8 +61,9 @@
                                 WatchResponse
                                 WatchResponseWithError
                                 WatchEvent$EventType)
-           (io.grpc Status$Code
-                    StatusRuntimeException)
+            (io.grpc Status$Code
+                     StatusRuntimeException)
+            (io.grpc.stub StreamObserver)
             ; Weirdly we *can't* catch this somehow: it yields an
             ; IllegalAccessError.
             ;(io.netty.channel StacklessClosedChannelException)
@@ -120,6 +128,23 @@
                                       :create-revision  (.getCreateRevision kv)
                                       :mod-revision     (.getModRevision kv)}))
 
+  LeaseGrantResponse (->clj [r]
+                       {:header (->clj (.getHeader r))
+                        :id     (.getID r)
+                        :ttl    (.getTTL r)})
+
+  LeaseKeepAliveResponse (->clj [r]
+                           {:header (->clj (.getHeader r))
+                            :id     (.getID r)
+                            :ttl    (.getTTL r)})
+
+  LeaseRevokeResponse (->clj [r]
+                        {:header (->clj (.getHeader r))})
+
+  LockResponse (->clj [r]
+                 {:header (->clj (.getHeader r))
+                  :key    (.getKey r)})
+
   Member (->clj [r]
            {:name (.getName r)
             :id   (.getId r)})
@@ -161,6 +186,9 @@
                  :puts       (map ->clj (.getPutResponses r))
                  :txns       (map ->clj (.getTxnResponses r))
                  :header     (->clj (.getHeader r))})
+
+  UnlockResponse (->clj [r]
+                   {:header (->clj (.getHeader r))})
 
   WatchEvent (->clj [e]
               {:type     (->clj (.getEventType e))
@@ -303,6 +331,9 @@
 
                     #"raft: stopped"
                     {:definite? true, :type :raft-stopped}
+
+                    #"mutex: session is expired"
+                    {:definite? false, :type :mutex-session-expired}
 
                     #"etcdserver: too many requests"
                     {:definite? true, :type, :etcdserver-too-many-requests}
@@ -504,6 +535,48 @@
         value'
         (do (Thread/sleep (swap-retry-delay))
             (recur))))))
+
+(defn ^Lease lease-client
+  "Gets a lease client from a client."
+  [^Client c]
+  (.getLeaseClient c))
+
+(defn grant-lease!
+  "Grants a lease on a client, with the given TTL in seconds."
+  [c ^long ttl]
+  (-> c lease-client (.grant ttl) await ->clj))
+
+(defn revoke-lease!
+  "Revokes a lease."
+  [c ^long lease-id]
+  (-> c lease-client (.revoke lease-id) await ->clj))
+
+(defn keep-lease-alive!
+  "Keeps a lease alive forever. Returns a ClosableClient. I don't really think
+  this means FOREVER, but the API docs are super unclear. I assume we call
+  .close to stop sending keepalives?"
+  [c ^long lease-id]
+  (let [observer (reify StreamObserver
+                   (onNext [this v]     (info :onNext lease-id (->clj v)))
+                   (onError [this t]    (info t :onError lease-id))
+                   (onCompleted [this]  (info :onCompleted lease-id)))]
+    (-> c lease-client
+        (.keepAlive lease-id observer))))
+
+(defn ^Lock lock-client
+  "Gets a lock client from a client."
+  [^Client c]
+  (.getLockClient c))
+
+(defn acquire-lock!
+  "Acquires a lock with the given name and lease ID."
+  [c name ^long lease-id]
+  (-> c lock-client (.lock (->bytes name) lease-id) await ->clj))
+
+(defn release-lock!
+  "Releases a lock with the given lock ownership key."
+  [c ^ByteSequence lock-key]
+  (-> c lock-client (.unlock lock-key) await ->clj))
 
 (defn ^Cluster cluster-client
   "Gets a cluster client for a client."

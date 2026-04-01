@@ -3,7 +3,7 @@
   :url "https://github.io/jepsen/etcd"
   :license {:name "EPL-2.0 OR GPL-2.0-or-later WITH Classpath-exception-2.0"
             :url "https://www.eclipse.org/legal/epl-2.0/"}
-  :dependencies [[jepsen "0.3.10-SNAPSHOT"
+  :dependencies [[jepsen "0.3.12-SNAPSHOT"
                   ; Antithesis needs a specific version and we're too new
                   :exclusions [com.fasterxml.jackson.core/jackson-core
                                com.fasterxml.jackson.core/jackson-annotations

@@ -21,10 +21,28 @@
 (def logfile (str dir "/etcd.log"))
 (def pidfile (str dir "/etcd.pid"))
 
+(defn linux-arch
+  "Maps `uname -m` to the etcd release architecture suffix."
+  []
+  (case (str/trim (c/exec :uname :-m))
+    "x86_64"  "amd64"
+    "aarch64" "arm64"
+    "arm64"   "arm64"
+    (throw+ {:type :unsupported-arch
+             :arch (str/trim (c/exec :uname :-m))})))
+
 (defn data-dir
   "Where does this node store its data on disk?"
   [node]
   (str dir "/" node ".etcd"))
+
+(defn etcd-env
+  "Environment variables for etcd startup. Older etcd releases require an
+  escape hatch to run on arm64."
+  [test]
+  (when (and (= "arm64" (linux-arch))
+             (str/starts-with? (:version test) "3.4."))
+    {"ETCD_UNSUPPORTED_ARCH" "arm64"}))
 
 (defn wipe!
   "Wipes data files on the current node."
@@ -77,7 +95,8 @@
   [test node opts]
   (c/su
     (cu/start-daemon!
-      {:logfile logfile
+      {:env     (etcd-env test)
+       :logfile logfile
        :pidfile pidfile
        :chdir   dir}
       binary
@@ -198,9 +217,9 @@
     ; Install
     (let [version (:version test)]
       (info node "installing etcd" version)
-      (c/su
-        (let [url (str "https://storage.googleapis.com/etcd/v" version
-                       "/etcd-v" version "-linux-amd64.tar.gz")]
+      (let [url (str "https://storage.googleapis.com/etcd/v" version
+                     "/etcd-v" version "-linux-" (linux-arch) ".tar.gz")]
+        (c/su
           (cu/install-archive! url dir))))
 
     (when (:lazyfs test)

@@ -521,7 +521,7 @@
 (defn swap-retry-delay
   "A delay time for swap! retries, in milliseconds"
   []
-  (rand 50))
+  (long (rand-int 50)))
 
 (defn swap!
   "Like clojure.core's swap!; takes a key and a function taking a value of that

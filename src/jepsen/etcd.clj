@@ -173,12 +173,15 @@
 
 (def cli-opts
   "Additional command line options."
-  [[nil "--client-type TYPE" "What kind of client should we use? Either jetcd or etcdctl. Etcdctl is an experiment and is definitely buggy--in particular, it has a habit of getting stuck while running commands and accidentally leaking operations into the *next* test run."
-    :default :jetcd
-    :parse-fn keyword
-    :validate [#{:etcdctl :jetcd} (cli/one-of #{:etcdctl :jetcd})]]
+   [[nil "--client-type TYPE" "What kind of client should we use? Either jetcd or etcdctl. Etcdctl is an experiment and is definitely buggy--in particular, it has a habit of getting stuck while running commands and accidentally leaking operations into the *next* test run."
+     :default :jetcd
+     :parse-fn keyword
+     :validate [#{:etcdctl :jetcd} (cli/one-of #{:etcdctl :jetcd})]]
 
-    [nil "--corrupt-check" "If set, enables etcd's experimental corruption checking options"]
+    [nil "--instrument-specs" "Enable runtime Clojure spec instrumentation for etcd workload/test constructors."
+     :default false]
+
+     [nil "--corrupt-check" "If set, enables etcd's experimental corruption checking options"]
 
     [nil "--debug" "If set, enables additional (somewhat expensive) debug logging; for instance, txn-list-append will includethe intermediate transactions it executes as a part of each operation."]
 
@@ -241,18 +244,105 @@
 (def test-all-cli-opts
   "CLI options just for test-all"
    [["-w" "--workload NAME" "What workload should we run?"
-    :parse-fn keyword
-    :validate [workloads (cli/one-of workloads)]]
+     :parse-fn keyword
+     :validate [workloads (cli/one-of workloads)]]
    ])
+
+(defn single-test-argv
+  "Constructs a synthetic `test` argv for a specific expanded test-all case so
+  stored subtests can be re-analyzed later with `lein run analyze -t ...`."
+  [opts]
+  (cond-> ["test"]
+    (:ssh-private-key opts)
+    (into ["--ssh-private-key" (:ssh-private-key opts)])
+
+    (:concurrency opts)
+    (into ["--concurrency" (str (:concurrency opts))])
+
+    (:rate opts)
+    (into ["--rate" (str (:rate opts))])
+
+    (:time-limit opts)
+    (into ["--time-limit" (str (:time-limit opts))])
+
+    (:workload opts)
+    (into ["--workload" (name (:workload opts))])
+
+    (:nemesis opts)
+    (into ["--nemesis" (str/join "," (map name (:nemesis opts)))])
+
+    (:client-type opts)
+    (into ["--client-type" (name (:client-type opts))])
+
+    (:version opts)
+    (into ["--version" (:version opts)])
+
+    (:ops-per-key opts)
+    (into ["--ops-per-key" (str (:ops-per-key opts))])
+
+    (:snapshot-count opts)
+    (into ["--snapshot-count" (str (:snapshot-count opts))])
+
+    (:nemesis-interval opts)
+    (into ["--nemesis-interval" (str (:nemesis-interval opts))])
+
+    (:retry-max-attempts opts)
+    (into ["--retry-max-attempts" (str (:retry-max-attempts opts))])
+
+    (:serializable? opts)
+    (conj "--serializable")
+
+    (:corrupt-check opts)
+    (conj "--corrupt-check")
+
+    (:debug opts)
+    (conj "--debug")
+
+    (:lazyfs opts)
+    (conj "--lazyfs")
+
+    (:tcpdump opts)
+    (conj "--tcpdump")
+
+    (:unsafe-no-fsync opts)
+    (conj "--unsafe-no-fsync")
+
+    (:logging-json? opts)
+    (conj "--logging-json")
+
+     (:leave-db-running? opts)
+     (conj "--leave-db-running")
+
+     (:instrument-specs opts)
+     (conj "--instrument-specs")
+
+     (:history-only? opts)
+     (conj "--history-only")))
+
+(defonce specs-instrumented?
+  (atom false))
+
+(defn maybe-enable-specs!
+  [opts]
+  (when (:instrument-specs opts)
+    (when (compare-and-set! specs-instrumented? false true)
+      (require 'jepsen.etcd.specs)
+      ((resolve 'jepsen.etcd.specs/instrument!)))))
+
+(defn instrumented-etcd-test
+  [opts]
+  (maybe-enable-specs! opts)
+  (etcd-test opts))
 
 (defn all-test-options
   "Takes base cli options, a collection of nemeses, workloads, and a test count,
   and constructs a sequence of test options."
   [cli nemeses workloads]
   (for [n nemeses, w workloads, i (range (:test-count cli))]
-    (assoc cli
-           :nemesis   n
-           :workload  w)))
+    (let [opts (assoc cli
+                      :nemesis  n
+                      :workload w)]
+      (assoc opts :argv (single-test-argv opts)))))
 
 (defn all-tests
   "Turns CLI options into a sequence of tests."
@@ -270,12 +360,12 @@
   browsing results."
   [& args]
   (antithesis/with-rng
-    (cli/run! (merge (cli/single-test-cmd {:test-fn  etcd-test
+    (cli/run! (merge (cli/single-test-cmd {:test-fn  instrumented-etcd-test
                                            :opt-spec (into cli-opts
-                                                           test-cli-opts)})
-                     (cli/test-all-cmd {:tests-fn (partial all-tests etcd-test)
-                                        :opt-spec (into cli-opts
-                                                        test-all-cli-opts)})
+                                                            test-cli-opts)})
+                     (cli/test-all-cmd {:tests-fn (partial all-tests instrumented-etcd-test)
+                                         :opt-spec (into cli-opts
+                                                         test-all-cli-opts)})
                      (cli/serve-cmd))
               args)))
 

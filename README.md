@@ -30,6 +30,12 @@ Or to show stale reads violate linearizability:
 lein run test --time-limit 30 -s --nemesis partition --workload register --concurrency 2n
 ```
 
+If you want to save `history.edn`/`history.txt` without running the checker yet:
+
+```sh
+lein run test --workload lock-set --nemesis pause --history-only
+```
+
 ## Workloads
 
 `append` appends values to keys and reads them back, using transactions to
@@ -62,6 +68,9 @@ the cluster too badly, which may result in indefinite results.
 ## Options
 
 `--concurrency 4n` says "run 4 worker threads per node".
+
+`--history-only` skips checker analysis after the run, but still saves the test
+and history artifacts to disk for later `analyze`.
 
 `--lazyfs` mounts the etcd data directory in a lazyfs FUSE filesystem, and alters the `kill` nemesis to also lose un-fsynced writes.
 

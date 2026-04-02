@@ -13,6 +13,7 @@
             [jepsen.db :as db]
             [jepsen.etcd :as etcd]
             [jepsen.etcd.append :as append]
+            [jepsen.etcd.lock :as lock]
             [jepsen.etcd.register :as register]
             [jepsen.etcd.set :as set]
             [jepsen.etcd.watch :as watch]
@@ -76,6 +77,24 @@
   (s/keys :req-un [::client ::checker ::generator]
           :opt-un [::final-generator]))
 
+(defn lock-set-op?
+  [op]
+  (and (map? op)
+       (= :invoke (:type op))
+       (contains? op :process)
+       (contains? op :index)
+       (contains? op :time)
+       (integer? (:process op))
+       (integer? (:index op))
+       (integer? (:time op))
+       (case (:f op)
+         :read (nil? (:value op))
+         :add  (and (integer? (:value op))
+                    (not (neg? (:value op))))
+         false)))
+
+(s/def ::lock-set-op lock-set-op?)
+
 (s/def ::db db-instance?)
 (s/def ::name string?)
 (s/def ::test-map
@@ -98,6 +117,10 @@
   :args (s/cat :opts ::opts)
   :ret ::workload-map)
 
+(s/fdef lock/set-workload
+  :args (s/cat :opts ::opts)
+  :ret ::workload-map)
+
 (s/fdef register/workload
   :args (s/cat :opts ::opts)
   :ret ::workload-map)
@@ -115,7 +138,7 @@
   :ret ::test-map)
 
 (def sample-opts
-  {:workload :set
+  {:workload :lock-set
    :nodes ["n1" "n2" "n3" "n4" "n5"]
    :version "3.5.15"
    :client-type :jetcd
@@ -132,6 +155,7 @@
 
 (def workload-constructors
   [[:append append/workload]
+   [:lock-set lock/set-workload]
    [:set set/workload]
    [:register register/workload]
    [:watch watch/workload]
@@ -140,6 +164,7 @@
 (def instrumented-vars
   [#'etcd/parse-nemesis-spec
    #'append/workload
+   #'lock/set-workload
    #'set/workload
    #'register/workload
    #'watch/workload
@@ -163,6 +188,53 @@
                          (str workload-name " workload map"))
       (println "OK workload" workload-name))))
 
+(defn sample-generator-ops!
+  [generator test n]
+  (loop [generator generator
+         ctx       (gen/context test)
+         ops       []]
+    (if (= n (count ops))
+      ops
+      (let [step (gen/op generator test ctx)
+            [op generator' ctx']
+            (cond
+              (and (vector? step) (= 2 (count step)))
+              [(first step) (second step) ctx]
+
+              (and (vector? step) (= 3 (count step)))
+              step
+
+              :else
+              (throw (ex-info "Unexpected generator step shape"
+                              {:step step})))]
+        (cond
+          (nil? op)
+          (throw (ex-info "Generator ended unexpectedly while sampling"
+                          {:sample-size n
+                           :ops-sampled (count ops)}))
+
+          (= :pending op)
+          (throw (ex-info "Generator returned :pending while sampling"
+                          {:sample-size n
+                           :ops-sampled (count ops)}))
+
+          :else
+          (recur generator' ctx' (conj ops op)))))))
+
+(defn validate-lock-set-generator!
+  []
+  (let [test     (assoc sample-opts :pure-generators true)
+        workload (lock/set-workload sample-opts)
+        ops      (sample-generator-ops! (:generator workload) test 40)
+        fs       (set (map :f ops))]
+    (doseq [op ops]
+      (explain-or-throw! ::lock-set-op op "lock-set sampled op"))
+    (when-not (= #{:read :add} fs)
+      (throw (ex-info "Expected sampled lock-set ops to include both :read and :add"
+                      {:f-values fs
+                       :ops ops})))
+    (println "OK lock-set generator ops")))
+
 (defn validate-etcd-test!
   []
   (let [test (etcd/etcd-test sample-opts)]
@@ -179,6 +251,8 @@
   (instrument!)
   (println "Validating workload constructors...")
   (validate-workloads!)
+  (println "Validating lock-set generator output...")
+  (validate-lock-set-generator!)
   (println "Validating etcd-test entrypoint...")
   (validate-etcd-test!)
   (println)

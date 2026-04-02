@@ -21,11 +21,12 @@
             [jepsen.control.util :as cu]
              [jepsen.os.debian :as debian]
              [jepsen.etcd [append :as append]
-                          [db :as db]
-                          [client :as ec]
-                          [nemesis :as nemesis]
-                          [register :as register]
-                          [set :as set]
+                           [db :as db]
+                           [client :as ec]
+                           [lock :as lock]
+                           [nemesis :as nemesis]
+                           [register :as register]
+                           [set :as set]
                           [support :as s]
                          [watch :as watch]
                          [wr :as wr]]
@@ -35,6 +36,7 @@
 (def workloads
   "A map of workload names to functions that construct workloads, given opts."
   {:append         append/workload
+   :lock-set       lock/set-workload
    :none           (fn [_] tests/noop-test)
    :set            set/workload
    :register       register/workload
@@ -47,7 +49,7 @@
 
 (def workloads-expected-to-pass
   "A collection of workload names which we expect should actually pass."
-  all-workloads)
+  (remove #{:lock-set} all-workloads))
 
 (def nemeses
   "All nemeses"

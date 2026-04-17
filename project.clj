@@ -31,6 +31,7 @@
                                com.fasterxml.jackson.core/jackson-databind]]
                  ]
   :jvm-opts ["-Djava.awt.headless=true"
+             "-Djava.net.preferIPv4Stack=true"
              "-server"
              "-Xmx72g"]
   :repl-options {:init-ns jepsen.etcd}
